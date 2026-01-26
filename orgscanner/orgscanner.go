@@ -24,9 +24,9 @@ func Process(root string) (*ProcessedFiles, error) {
 	}
 
 	procFiles := &ProcessedFiles{
-		Files:   make([]FileInfo, 0, len(files)),
-		UuidMap: sync.Map{},
-		TagMap:  sync.Map{},
+		Files:     make([]FileInfo, 0, len(files)),
+		UuidIndex: sync.Map{},
+		TagMap:    sync.Map{},
 	}
 
 	var filesWithUUIDs int64
@@ -57,10 +57,10 @@ func Process(root string) (*ProcessedFiles, error) {
 			}
 
 			// Populate UUID map
-			for uuid, headerIndex := range parsed.UUIDs {
-				procFiles.UuidMap.Store(uuid, HeaderLocation{
-					FilePath:    parsed.Path,
-					HeaderIndex: headerIndex,
+			for uuid, position := range parsed.UUIDs {
+				procFiles.UuidIndex.Store(uuid, HeaderLocation{
+					FilePath: parsed.Path,
+					Position: position,
 				})
 			}
 

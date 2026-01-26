@@ -95,8 +95,8 @@ func extractTags(doc *org.Document) []string {
 }
 
 // extractUUIDs walks the AST to find all UUIDs in property drawers.
-func extractUUIDs(doc *org.Document) UUIDMap {
-	uuidToHeaderIndex := make(UUIDMap)
+func extractUUIDs(doc *org.Document) FileUUIDPositions {
+	uuidToPosition := make(FileUUIDPositions)
 
 	var walkNodes func(node org.Node)
 	walkNodes = func(node org.Node) {
@@ -106,7 +106,7 @@ func extractUUIDs(doc *org.Document) UUIDMap {
 					if prop[0] == "ID" && prop[1] != "" {
 						id := UUID(prop[1])
 						if isValidUUID(string(id)) {
-							uuidToHeaderIndex[id] = HeaderIndex(headline.Index)
+							uuidToPosition[id] = headline.Pos
 						}
 					}
 				}
@@ -122,10 +122,10 @@ func extractUUIDs(doc *org.Document) UUIDMap {
 		walkNodes(node)
 	}
 
-	if len(uuidToHeaderIndex) > 0 {
-		slog.Debug("Extracted UUIDs from property drawers", "uuid_count", len(uuidToHeaderIndex))
+	if len(uuidToPosition) > 0 {
+		slog.Debug("Extracted UUIDs from property drawers", "uuid_count", len(uuidToPosition))
 	}
-	return uuidToHeaderIndex
+	return uuidToPosition
 }
 
 // extractPreview extracts a text preview from the document.
