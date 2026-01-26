@@ -12,18 +12,22 @@ type Block struct {
 	Parameters []string
 	Children   []Node
 	Result     Node
+	Pos        Position
 }
 
 type Result struct {
 	Node Node
+	Pos  Position
 }
 
 type Example struct {
 	Children []Node
+	Pos      Position
 }
 
 type LatexBlock struct {
 	Content []Node
+	Pos     Position
 }
 
 var exampleLineRegexp = regexp.MustCompile(`^(\s*):(\s(.*)|\s*$)`)
@@ -36,32 +40,32 @@ var exampleBlockEscapeRegexp = regexp.MustCompile(`(^|\n)([ \t]*),([ \t]*)(\*|,\
 
 func lexBlock(line string) (token, bool) {
 	if m := beginBlockRegexp.FindStringSubmatch(line); m != nil {
-		return token{"beginBlock", len(m[1]), strings.ToUpper(m[2]), m}, true
+		return token{kind: "beginBlock", lvl: len(m[1]), content: strings.ToUpper(m[2]), matches: m}, true
 	} else if m := endBlockRegexp.FindStringSubmatch(line); m != nil {
-		return token{"endBlock", len(m[1]), strings.ToUpper(m[2]), m}, true
+		return token{kind: "endBlock", lvl: len(m[1]), content: strings.ToUpper(m[2]), matches: m}, true
 	}
 	return nilToken, false
 }
 
 func lexLatexBlock(line string) (token, bool) {
 	if m := beginLatexBlockRegexp.FindStringSubmatch(line); m != nil {
-		return token{"beginLatexBlock", len(m[1]), strings.ToUpper(m[2]), m}, true
+		return token{kind: "beginLatexBlock", lvl: len(m[1]), content: strings.ToUpper(m[2]), matches: m}, true
 	} else if m := endLatexBlockRegexp.FindStringSubmatch(line); m != nil {
-		return token{"endLatexBlock", len(m[1]), strings.ToUpper(m[2]), m}, true
+		return token{kind: "endLatexBlock", lvl: len(m[1]), content: strings.ToUpper(m[2]), matches: m}, true
 	}
 	return nilToken, false
 }
 
 func lexResult(line string) (token, bool) {
 	if m := resultRegexp.FindStringSubmatch(line); m != nil {
-		return token{"result", len(m[1]), "", m}, true
+		return token{kind: "result", lvl: len(m[1]), content: "", matches: m}, true
 	}
 	return nilToken, false
 }
 
 func lexExample(line string) (token, bool) {
 	if m := exampleLineRegexp.FindStringSubmatch(line); m != nil {
-		return token{"example", len(m[1]), m[3], m}, true
+		return token{kind: "example", lvl: len(m[1]), content: m[3], matches: m}, true
 	}
 	return nilToken, false
 }
@@ -75,7 +79,7 @@ func (d *Document) parseBlock(i int, parentStop stopFn) (int, Node) {
 	stop := func(d *Document, i int) bool {
 		return i >= len(d.tokens) || (d.tokens[i].kind == "endBlock" && d.tokens[i].content == name)
 	}
-	block, i := Block{name, parameters, nil, nil}, i+1
+	block, i := Block{Name: name, Parameters: parameters, Children: nil, Result: nil}, i+1
 	if isRawTextBlock(name) {
 		rawText := ""
 		for ; !stop(d, i); i++ {
@@ -98,6 +102,12 @@ func (d *Document) parseBlock(i int, parentStop stopFn) (int, Node) {
 		block.Result = result
 		i += consumed
 	}
+	block.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+		EndLine:     d.tokens[i].line,
+		EndColumn:   d.tokens[i].endCol,
+	}
 	return i + 1 - start, block
 }
 
@@ -114,7 +124,14 @@ func (d *Document) parseLatexBlock(i int, parentStop stopFn) (int, Node) {
 		return 0, nil
 	}
 	rawText += trim(d.tokens[i].matches[0])
-	return i + 1 - start, LatexBlock{d.parseRawInline(rawText)}
+	latexBlock := LatexBlock{Content: d.parseRawInline(rawText)}
+	latexBlock.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+		EndLine:     d.tokens[i].line,
+		EndColumn:   d.tokens[i].endCol,
+	}
+	return i + 1 - start, latexBlock
 }
 
 func (d *Document) parseSrcBlockResult(i int, parentStop stopFn) (int, Node) {
@@ -131,7 +148,14 @@ func (d *Document) parseSrcBlockResult(i int, parentStop stopFn) (int, Node) {
 func (d *Document) parseExample(i int, parentStop stopFn) (int, Node) {
 	example, start := Example{}, i
 	for ; !parentStop(d, i) && d.tokens[i].kind == "example"; i++ {
-		example.Children = append(example.Children, Text{d.tokens[i].content, true})
+		example.Children = append(example.Children, Text{Content: d.tokens[i].content, IsRaw: true})
+	}
+	endTokenIndex := i - 1
+	example.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+		EndLine:     d.tokens[endTokenIndex].line,
+		EndColumn:   d.tokens[endTokenIndex].endCol,
 	}
 	return i - start, example
 }
@@ -140,8 +164,16 @@ func (d *Document) parseResult(i int, parentStop stopFn) (int, Node) {
 	if i+1 >= len(d.tokens) {
 		return 0, nil
 	}
+	start := i
 	consumed, node := d.parseOne(i+1, parentStop)
-	return consumed + 1, Result{node}
+	result := Result{Node: node}
+	result.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+		EndLine:     d.tokens[start].line,
+		EndColumn:   d.tokens[start].endCol,
+	}
+	return consumed + 1, result
 }
 
 func trimIndentUpTo(max int) func(string) string {

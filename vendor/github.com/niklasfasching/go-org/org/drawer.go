@@ -8,10 +8,12 @@ import (
 type Drawer struct {
 	Name     string
 	Children []Node
+	Pos      Position
 }
 
 type PropertyDrawer struct {
 	Properties [][]string
+	Pos        Position
 }
 
 var beginDrawerRegexp = regexp.MustCompile(`^(\s*):(\S+):\s*$`)
@@ -20,9 +22,9 @@ var propertyRegexp = regexp.MustCompile(`^(\s*):(\S+):(\s+(.*)$|$)`)
 
 func lexDrawer(line string) (token, bool) {
 	if m := endDrawerRegexp.FindStringSubmatch(line); m != nil {
-		return token{"endDrawer", len(m[1]), "", m}, true
+		return token{kind: "endDrawer", lvl: len(m[1]), content: "", matches: m}, true
 	} else if m := beginDrawerRegexp.FindStringSubmatch(line); m != nil {
-		return token{"beginDrawer", len(m[1]), strings.ToUpper(m[2]), m}, true
+		return token{kind: "beginDrawer", lvl: len(m[1]), content: strings.ToUpper(m[2]), matches: m}, true
 	}
 	return nilToken, false
 }
@@ -33,6 +35,10 @@ func (d *Document) parseDrawer(i int, parentStop stopFn) (int, Node) {
 		return d.parsePropertyDrawer(i, parentStop)
 	}
 	drawer, start := Drawer{Name: name}, i
+	drawer.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+	}
 	i++
 	stop := func(d *Document, i int) bool {
 		if parentStop(d, i) {
@@ -46,7 +52,7 @@ func (d *Document) parseDrawer(i int, parentStop stopFn) (int, Node) {
 		i += consumed
 		drawer.Children = append(drawer.Children, nodes...)
 		if i < len(d.tokens) && d.tokens[i].kind == "beginDrawer" {
-			p := Paragraph{[]Node{Text{":" + d.tokens[i].content + ":", false}}}
+			p := Paragraph{Children: []Node{Text{Content: ":" + d.tokens[i].content + ":", IsRaw: false}}, Pos: Position{}}
 			drawer.Children = append(drawer.Children, p)
 			i++
 		} else {
@@ -61,6 +67,10 @@ func (d *Document) parseDrawer(i int, parentStop stopFn) (int, Node) {
 
 func (d *Document) parsePropertyDrawer(i int, parentStop stopFn) (int, Node) {
 	drawer, start := PropertyDrawer{}, i
+	drawer.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+	}
 	i++
 	stop := func(d *Document, i int) bool {
 		return parentStop(d, i) || (d.tokens[i].kind != "text" && d.tokens[i].kind != "beginDrawer")
@@ -77,6 +87,10 @@ func (d *Document) parsePropertyDrawer(i int, parentStop stopFn) (int, Node) {
 		i++
 	} else {
 		return 0, nil
+	}
+	if start < i && i-1 < len(d.tokens) {
+		drawer.Pos.EndLine = d.tokens[i-1].line
+		drawer.Pos.EndColumn = d.tokens[i-1].endCol
 	}
 	return i - start, drawer
 }

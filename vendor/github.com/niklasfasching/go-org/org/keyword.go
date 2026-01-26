@@ -7,31 +7,49 @@ import (
 	"strings"
 )
 
-type Comment struct{ Content string }
+type Comment struct {
+	Content string
+	Pos     Position
+}
 
 type Keyword struct {
 	Key   string
 	Value string
+	Pos   Position
 }
 
 type NodeWithName struct {
 	Name string
 	Node Node
+	Pos  Position
 }
 
 type NodeWithMeta struct {
 	Node Node
 	Meta Metadata
+	Pos  Position
 }
 
 type Metadata struct {
 	Caption        [][]Node
 	HTMLAttributes [][]string
+	Pos            Position
 }
 
 type Include struct {
 	Keyword
 	Resolve func() Node
+	Pos     Position
+}
+
+func (k Keyword) withPos(t token) Keyword {
+	k.Pos = Position{
+		StartLine:   t.line,
+		StartColumn: t.startCol,
+		EndLine:     t.line,
+		EndColumn:   t.endCol,
+	}
+	return k
 }
 
 var keywordRegexp = regexp.MustCompile(`^(\s*)#\+([^:]+):(\s+(.*)|$)`)
@@ -42,15 +60,23 @@ var attributeRegexp = regexp.MustCompile(`(?:^|\s+)(:[-\w]+)\s+(.*)$`)
 
 func lexKeywordOrComment(line string) (token, bool) {
 	if m := keywordRegexp.FindStringSubmatch(line); m != nil {
-		return token{"keyword", len(m[1]), m[2], m}, true
+		return token{kind: "keyword", lvl: len(m[1]), content: m[2], matches: m}, true
 	} else if m := commentRegexp.FindStringSubmatch(line); m != nil {
-		return token{"comment", len(m[1]), m[2], m}, true
+		return token{kind: "comment", lvl: len(m[1]), content: m[2], matches: m}, true
 	}
 	return nilToken, false
 }
 
 func (d *Document) parseComment(i int, stop stopFn) (int, Node) {
-	return 1, Comment{d.tokens[i].content}
+	return 1, Comment{
+		Content: d.tokens[i].content,
+		Pos: Position{
+			StartLine:   d.tokens[i].line,
+			StartColumn: d.tokens[i].startCol,
+			EndLine:     d.tokens[i].line,
+			EndColumn:   d.tokens[i].endCol,
+		},
+	}
 }
 
 func (d *Document) parseKeyword(i int, stop stopFn) (int, Node) {
@@ -97,7 +123,17 @@ func (d *Document) parseNodeWithName(k Keyword, i int, stop stopFn) (int, Node) 
 		return 0, nil
 	}
 	d.NamedNodes[k.Value] = node
-	return consumed + 1, NodeWithName{k.Value, node}
+	endToken := d.tokens[i+consumed]
+	return consumed + 1, NodeWithName{
+		Name: k.Value,
+		Node: node,
+		Pos: Position{
+			StartLine:   d.tokens[i].line,
+			StartColumn: d.tokens[i].startCol,
+			EndLine:     endToken.line,
+			EndColumn:   endToken.endCol,
+		},
+	}
 }
 
 func (d *Document) parseAffiliated(i int, stop stopFn) (int, Node) {
@@ -136,12 +172,30 @@ func (d *Document) parseAffiliated(i int, stop stopFn) (int, Node) {
 		return 0, nil
 	}
 	i += consumed
-	return i - start, NodeWithMeta{node, meta}
+	return i - start, NodeWithMeta{
+		Node: node,
+		Meta: meta,
+		Pos: Position{
+			StartLine:   d.tokens[start].line,
+			StartColumn: d.tokens[start].startCol,
+			EndLine:     d.tokens[i-1].line,
+			EndColumn:   d.tokens[i-1].endCol,
+		},
+	}
 }
 
 func parseKeyword(t token) Keyword {
 	k, v := t.matches[2], t.matches[4]
-	return Keyword{strings.ToUpper(k), strings.TrimSpace(v)}
+	return Keyword{
+		Key:   strings.ToUpper(k),
+		Value: strings.TrimSpace(v),
+		Pos: Position{
+			StartLine:   t.line,
+			StartColumn: t.startCol,
+			EndLine:     t.line,
+			EndColumn:   t.endCol,
+		},
+	}
 }
 
 func (d *Document) parseInclude(k Keyword) (int, Node) {
@@ -160,10 +214,14 @@ func (d *Document) parseInclude(k Keyword) (int, Node) {
 				d.Log.Printf("Bad include %#v: %s", k, err)
 				return k
 			}
-			return Block{strings.ToUpper(kind), []string{lang}, d.parseRawInline(string(bs)), nil}
+			return Block{Name: strings.ToUpper(kind), Parameters: []string{lang}, Children: d.parseRawInline(string(bs)), Result: nil, Pos: k.Pos}
 		}
 	}
-	return 1, Include{k, resolve}
+	return 1, Include{
+		Keyword: k,
+		Resolve: resolve,
+		Pos:     k.Pos,
+	}
 }
 
 func (d *Document) loadSetupFile(k Keyword) (int, Node) {

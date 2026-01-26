@@ -2,110 +2,59 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
+	"strings"
 
-	"github.com/alexispurslane/org-lsp/orgscanner"
+	"github.com/niklasfasching/go-org/org"
 )
 
 func main() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("Failed to get home directory: %v", err)
+	// Test input with a headline and paragraph
+	input := `This is a top-level paragraph.
+It has multiple lines.
+
+* A headline below`
+
+	// Parse the document
+	doc := org.New().Parse(strings.NewReader(input), "test.org")
+
+	if doc.Error != nil {
+		fmt.Printf("Parse error: %v\n", doc.Error)
+		return
 	}
 
-	blogPath := filepath.Join(homeDir, "Sync/Alexis Files Private/Notes/blog")
+	fmt.Printf("=== Position Tracking Test ===\n")
+	fmt.Printf("Document has %d nodes\n", len(doc.Nodes))
 
-	// Check if directory exists
-	if _, err := os.Stat(blogPath); os.IsNotExist(err) {
-		log.Fatalf("Directory does not exist: %s", blogPath)
-	}
+	for _, node := range doc.Nodes {
+		if headline, ok := node.(org.Headline); ok {
+			fmt.Printf("\nHeadline found: %s\n", headline.String())
+			fmt.Printf("Position: StartLine=%d, StartColumn=%d, EndLine=%d, EndColumn=%d\n",
+				headline.Pos.StartLine, headline.Pos.StartColumn,
+				headline.Pos.EndLine, headline.Pos.EndColumn)
 
-	fmt.Printf("Scanning org files in: %s\n\n", blogPath)
-
-	processed, err := orgscanner.Process(blogPath)
-	if err != nil {
-		log.Fatalf("Failed to process org files: %v", err)
-	}
-
-	fmt.Printf("=== Summary ===\n")
-	fmt.Printf("Total files processed: %d\n", len(processed.Files))
-
-	// Count UUIDs
-	uuidCount := 0
-	processed.UuidMap.Range(func(key, value interface{}) bool {
-		uuidCount++
-		return true
-	})
-	fmt.Printf("Total UUIDs found: %d\n", uuidCount)
-
-	// Count unique tags
-	tagCount := 0
-	processed.TagMap.Range(func(key, value interface{}) bool {
-		tagCount++
-		return true
-	})
-	fmt.Printf("Total unique tags: %d\n", tagCount)
-
-	// Show first few file titles
-	if len(processed.Files) > 0 {
-		fmt.Printf("\n=== Sample Files ===\n")
-		for i, file := range processed.Files {
-			if i >= 5 {
-				break
+			if headline.Pos.StartLine == 0 {
+				fmt.Printf("❌ FAIL: Headline StartLine is 0 (not set)\n")
+			} else {
+				fmt.Printf("✅ PASS: Headline StartLine is %d\n", headline.Pos.StartLine)
 			}
-			fmt.Printf("- %s\n", file.Path)
-			fmt.Printf("  Title: \"%s\"\n", file.Title)
-			if len(file.Tags) > 0 {
-				fmt.Printf("  Tags: %v\n", file.Tags)
-			}
-			if len(file.UUIDs) > 0 {
-				fmt.Printf("  UUIDs: %d found\n", len(file.UUIDs))
-			}
-			if file.Preview != "" {
-				preview := file.Preview
-				if len(preview) > 100 {
-					preview = preview[:100] + "..."
-				}
-				fmt.Printf("  Preview: \"%s\"\n", preview)
-			}
-			fmt.Println()
 		}
-	}
+		if paragraph, ok := node.(org.Paragraph); ok {
+			fmt.Printf("\nParagraph found: %s\n", paragraph.String())
+			fmt.Printf("Position: StartLine=%d, StartColumn=%d, EndLine=%d, EndColumn=%d\n",
+				paragraph.Pos.StartLine, paragraph.Pos.StartColumn,
+				paragraph.Pos.EndLine, paragraph.Pos.EndColumn)
 
-	// Show some UUID to location mappings
-	if uuidCount > 0 {
-		fmt.Printf("=== Sample UUIDs ===\n")
-		count := 0
-		processed.UuidMap.Range(func(key, value interface{}) bool {
-			if count >= 3 {
-				return false
+			if paragraph.Pos.StartLine == 0 {
+				fmt.Printf("❌ FAIL: Paragraph StartLine is 0 (not set)\n")
+			} else {
+				fmt.Printf("✅ PASS: Paragraph StartLine is %d\n", paragraph.Pos.StartLine)
 			}
-			uuid := key.(orgscanner.UUID)
-			loc := value.(orgscanner.HeaderLocation)
-			fmt.Printf("- %s\n", uuid)
-			fmt.Printf("  File: %s\n", loc.FilePath)
-			fmt.Printf("  Header Index: %d\n", loc.HeaderIndex)
-			fmt.Println()
-			count++
-			return true
-		})
-	}
 
-	// Show some tags
-	if tagCount > 0 {
-		fmt.Printf("=== Tags Found ===\n")
-		count := 0
-		processed.TagMap.Range(func(key, value interface{}) bool {
-			if count >= 10 {
-				return false
+			if paragraph.Pos.EndLine == 0 {
+				fmt.Printf("❌ FAIL: Paragraph EndLine is 0 (not set)\n")
+			} else {
+				fmt.Printf("✅ PASS: Paragraph EndLine is %d\n", paragraph.Pos.EndLine)
 			}
-			tag := key.(string)
-			files := value.([]orgscanner.FileInfo)
-			fmt.Printf("- %s (%d files)\n", tag, len(files))
-			count++
-			return true
-		})
+		}
 	}
 }

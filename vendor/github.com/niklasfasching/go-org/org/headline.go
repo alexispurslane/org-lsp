@@ -29,6 +29,7 @@ type Headline struct {
 	Title      []Node
 	Tags       []string
 	Children   []Node
+	Pos        Position
 }
 
 var headlineRegexp = regexp.MustCompile(`^([*]+)\s+(.*)`)
@@ -36,7 +37,7 @@ var tagRegexp = regexp.MustCompile(`(.*?)\s+(:[\p{L}0-9_@#%:]+:\s*$)`)
 
 func lexHeadline(line string) (token, bool) {
 	if m := headlineRegexp.FindStringSubmatch(line); m != nil {
-		return token{"headline", 0, m[2], m}, true
+		return token{kind: "headline", lvl: 0, content: m[2], matches: m}, true
 	}
 	return nilToken, false
 }
@@ -82,6 +83,13 @@ func (d *Document) parseHeadline(i int, parentStop stopFn) (int, Node) {
 		}
 	}
 	headline.Children = nodes
+	endToken := d.tokens[i+consumed]
+	headline.Pos = Position{
+		StartLine:   t.line,
+		StartColumn: t.startCol,
+		EndLine:     endToken.line,
+		EndColumn:   endToken.endCol,
+	}
 	return consumed + 1, headline
 }
 

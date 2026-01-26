@@ -10,6 +10,7 @@ import (
 type List struct {
 	Kind  string
 	Items []Node
+	Pos   Position
 }
 
 type ListItem struct {
@@ -17,6 +18,7 @@ type ListItem struct {
 	Status   string
 	Value    string
 	Children []Node
+	Pos      Position
 }
 
 type DescriptiveListItem struct {
@@ -24,6 +26,7 @@ type DescriptiveListItem struct {
 	Status  string
 	Term    []Node
 	Details []Node
+	Pos     Position
 }
 
 var unorderedListRegexp = regexp.MustCompile(`^(\s*)([+*-])(\s+(.*)|$)`)
@@ -34,9 +37,9 @@ var listItemStatusRegexp = regexp.MustCompile(`\[( |X|-)\]\s`)
 
 func lexList(line string) (token, bool) {
 	if m := unorderedListRegexp.FindStringSubmatch(line); m != nil {
-		return token{"unorderedList", len(m[1]), m[4], m}, true
+		return token{kind: "unorderedList", lvl: len(m[1]), content: m[4], matches: m}, true
 	} else if m := orderedListRegexp.FindStringSubmatch(line); m != nil {
-		return token{"orderedList", len(m[1]), m[5], m}, true
+		return token{kind: "orderedList", lvl: len(m[1]), content: m[5], matches: m}, true
 	}
 	return nilToken, false
 }
@@ -77,6 +80,12 @@ func (d *Document) parseList(i int, parentStop stopFn) (int, Node) {
 		i += consumed
 		list.Items = append(list.Items, node)
 	}
+	list.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+		EndLine:     d.tokens[i-1].line,
+		EndColumn:   d.tokens[i-1].endCol,
+	}
 	return i - start, list
 }
 
@@ -113,9 +122,23 @@ func (d *Document) parseListItem(l List, i int, parentStop stopFn) (int, Node) {
 	}
 	d.baseLvl = originalBaseLvl
 	if l.Kind == "descriptive" {
-		return i - start, DescriptiveListItem{bullet, status, d.parseInline(dterm), nodes}
+		item := DescriptiveListItem{Bullet: bullet, Status: status, Term: d.parseInline(dterm), Details: nodes}
+		item.Pos = Position{
+			StartLine:   d.tokens[start].line,
+			StartColumn: d.tokens[start].startCol,
+			EndLine:     d.tokens[i-1].line,
+			EndColumn:   d.tokens[i-1].endCol,
+		}
+		return i - start, item
 	}
-	return i - start, ListItem{bullet, status, value, nodes}
+	item := ListItem{Bullet: bullet, Status: status, Value: value, Children: nodes}
+	item.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+		EndLine:     d.tokens[i-1].line,
+		EndColumn:   d.tokens[i-1].endCol,
+	}
+	return i - start, item
 }
 
 func (n List) String() string                { return String(n) }

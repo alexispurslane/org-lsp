@@ -11,22 +11,26 @@ type Table struct {
 	Rows             []Row
 	ColumnInfos      []ColumnInfo
 	SeparatorIndices []int
+	Pos              Position
 }
 
 type Row struct {
 	Columns   []Column
 	IsSpecial bool
+	Pos       Position
 }
 
 type Column struct {
 	Children []Node
 	*ColumnInfo
+	Pos Position
 }
 
 type ColumnInfo struct {
 	Align      string
 	Len        int
 	DisplayLen int
+	Pos        Position
 }
 
 var tableSeparatorRegexp = regexp.MustCompile(`^(\s*)(\|[+-|]*)\s*$`)
@@ -36,9 +40,9 @@ var columnAlignAndLengthRegexp = regexp.MustCompile(`^<(l|c|r)?(\d+)?>$`)
 
 func lexTable(line string) (token, bool) {
 	if m := tableSeparatorRegexp.FindStringSubmatch(line); m != nil {
-		return token{"tableSeparator", len(m[1]), m[2], m}, true
+		return token{kind: "tableSeparator", lvl: len(m[1]), content: m[2], matches: m}, true
 	} else if m := tableRowRegexp.FindStringSubmatch(line); m != nil {
-		return token{"tableRow", len(m[1]), m[2], m}, true
+		return token{kind: "tableRow", lvl: len(m[1]), content: m[2], matches: m}, true
 	}
 	return nilToken, false
 }
@@ -60,19 +64,31 @@ func (d *Document) parseTable(i int, parentStop stopFn) (int, Node) {
 		}
 	}
 
-	table := Table{nil, getColumnInfos(rawRows), separatorIndices}
-	for _, rawColumns := range rawRows {
-		row := Row{nil, isSpecialRow(rawColumns)}
+	table := Table{Rows: nil, ColumnInfos: getColumnInfos(rawRows), SeparatorIndices: separatorIndices}
+	for j, rawColumns := range rawRows {
+		row := Row{Columns: nil, IsSpecial: isSpecialRow(rawColumns)}
 		if len(rawColumns) != 0 {
 			for i := range table.ColumnInfos {
-				column := Column{nil, &table.ColumnInfos[i]}
+				column := Column{Children: nil, ColumnInfo: &table.ColumnInfos[i]}
 				if i < len(rawColumns) {
 					column.Children = d.parseInline(rawColumns[i])
 				}
 				row.Columns = append(row.Columns, column)
 			}
 		}
+		row.Pos = Position{
+			StartLine:   d.tokens[start+j].line,
+			StartColumn: d.tokens[start+j].startCol,
+			EndLine:     d.tokens[start+j].line,
+			EndColumn:   d.tokens[start+j].endCol,
+		}
 		table.Rows = append(table.Rows, row)
+	}
+	table.Pos = Position{
+		StartLine:   d.tokens[start].line,
+		StartColumn: d.tokens[start].startCol,
+		EndLine:     d.tokens[i-1].line,
+		EndColumn:   d.tokens[i-1].endCol,
 	}
 	return i - start, table
 }

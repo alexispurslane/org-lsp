@@ -13,42 +13,54 @@ import (
 type Text struct {
 	Content string
 	IsRaw   bool
+	Pos     Position
 }
 
 type LineBreak struct {
 	Count                      int
 	BetweenMultibyteCharacters bool
+	Pos                        Position
 }
-type ExplicitLineBreak struct{}
+type ExplicitLineBreak struct {
+	Pos Position
+}
 
-type StatisticToken struct{ Content string }
+type StatisticToken struct {
+	Content string
+	Pos     Position
+}
 
 type Timestamp struct {
 	Time     time.Time
 	IsDate   bool
 	Interval string
+	Pos      Position
 }
 
 type Emphasis struct {
 	Kind    string
 	Content []Node
+	Pos     Position
 }
 
 type InlineBlock struct {
 	Name       string
 	Parameters []string
 	Children   []Node
+	Pos        Position
 }
 
 type LatexFragment struct {
 	OpeningPair string
 	ClosingPair string
 	Content     []Node
+	Pos         Position
 }
 
 type FootnoteLink struct {
 	Name       string
 	Definition *FootnoteDefinition
+	Pos        Position
 }
 
 type RegularLink struct {
@@ -56,11 +68,13 @@ type RegularLink struct {
 	Description []Node
 	URL         string
 	AutoLink    bool
+	Pos         Position
 }
 
 type Macro struct {
 	Name       string
 	Parameters []string
+	Pos        Position
 }
 
 var validURLCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;="
@@ -120,7 +134,7 @@ func (d *Document) parseInline(input string) (nodes []Node) {
 		current -= rewind
 		if consumed != 0 {
 			if current > previous {
-				nodes = append(nodes, Text{input[previous:current], false})
+				nodes = append(nodes, Text{Content: input[previous:current], IsRaw: false})
 			}
 			if node != nil {
 				nodes = append(nodes, node)
@@ -133,7 +147,7 @@ func (d *Document) parseInline(input string) (nodes []Node) {
 	}
 
 	if previous < len(input) {
-		nodes = append(nodes, Text{input[previous:], false})
+		nodes = append(nodes, Text{Content: input[previous:], IsRaw: false})
 	}
 	return nodes
 }
@@ -144,7 +158,7 @@ func (d *Document) parseRawInline(input string) (nodes []Node) {
 		if input[current] == '\n' {
 			consumed, node := d.parseLineBreak(input, current)
 			if current > previous {
-				nodes = append(nodes, Text{input[previous:current], true})
+				nodes = append(nodes, Text{Content: input[previous:current], IsRaw: true})
 			}
 			nodes = append(nodes, node)
 			current += consumed
@@ -154,7 +168,7 @@ func (d *Document) parseRawInline(input string) (nodes []Node) {
 		}
 	}
 	if previous < len(input) {
-		nodes = append(nodes, Text{input[previous:], true})
+		nodes = append(nodes, Text{Content: input[previous:], IsRaw: true})
 	}
 	return nodes
 }
@@ -165,7 +179,7 @@ func (d *Document) parseLineBreak(input string, start int) (int, Node) {
 	}
 	_, beforeLen := utf8.DecodeLastRuneInString(input[:start])
 	_, afterLen := utf8.DecodeRuneInString(input[i:])
-	return i - start, LineBreak{i - start, beforeLen > 1 && afterLen > 1}
+	return i - start, LineBreak{Count: i - start, BetweenMultibyteCharacters: beforeLen > 1 && afterLen > 1}
 }
 
 func (d *Document) parseInlineBlock(input string, start int) (int, int, Node) {
@@ -173,14 +187,14 @@ func (d *Document) parseInlineBlock(input string, start int) (int, int, Node) {
 		return 0, 0, nil
 	}
 	if m := inlineBlockRegexp.FindStringSubmatch(input[start-3:]); m != nil {
-		return 3, len(m[0]), InlineBlock{"src", strings.Fields(m[1] + " " + m[3]), d.parseRawInline(m[4])}
+		return 3, len(m[0]), InlineBlock{Name: "src", Parameters: strings.Fields(m[1] + " " + m[3]), Children: d.parseRawInline(m[4])}
 	}
 	return 0, 0, nil
 }
 
 func (d *Document) parseInlineExportBlock(input string, start int) (int, Node) {
 	if m := inlineExportBlockRegexp.FindStringSubmatch(input[start:]); m != nil {
-		return len(m[0]), InlineBlock{"export", m[1:2], d.parseRawInline(m[2])}
+		return len(m[0]), InlineBlock{Name: "export", Parameters: m[1:2], Children: d.parseRawInline(m[2])}
 	}
 	return 0, nil
 }
@@ -201,7 +215,7 @@ func (d *Document) parseExplicitLineBreakOrLatexFragment(input string, start int
 			if open, content, close := m[1], m[2], m[3]; open == close {
 				openingPair, closingPair := `\begin{`+open+`}`, `\end{`+close+`}`
 				i := strings.Index(input[start:], closingPair)
-				return i + len(closingPair), LatexFragment{openingPair, closingPair, d.parseRawInline(content)}
+				return i + len(closingPair), LatexFragment{OpeningPair: openingPair, ClosingPair: closingPair, Content: d.parseRawInline(content)}
 			}
 		}
 	}
@@ -219,14 +233,14 @@ func (d *Document) parseLatexFragment(input string, start int, pairLength int) (
 	closingPair := latexFragmentPairs[openingPair]
 	if i := strings.Index(input[start+pairLength:], closingPair); i != -1 {
 		content := d.parseRawInline(input[start+pairLength : start+pairLength+i])
-		return i + pairLength + pairLength, LatexFragment{openingPair, closingPair, content}
+		return i + pairLength + pairLength, LatexFragment{OpeningPair: openingPair, ClosingPair: closingPair, Content: content}
 	}
 	return 0, nil
 }
 
 func (d *Document) parseSubOrSuperScript(input string, start int) (int, Node) {
 	if m := subScriptSuperScriptRegexp.FindStringSubmatch(input[start:]); m != nil {
-		return len(m[2]) + 3, Emphasis{m[1] + "{}", []Node{Text{m[2], false}}}
+		return len(m[2]) + 3, Emphasis{Kind: m[1] + "{}", Content: []Node{Text{Content: m[2], IsRaw: false}}}
 	}
 	return 0, nil
 }
@@ -254,7 +268,7 @@ func (d *Document) parseOpeningBracket(input string, start int) (int, Node) {
 
 func (d *Document) parseMacro(input string, start int) (int, Node) {
 	if m := macroRegexp.FindStringSubmatch(input[start:]); m != nil {
-		return len(m[0]), Macro{m[1], strings.Split(m[2], ",")}
+		return len(m[0]), Macro{Name: m[1], Parameters: strings.Split(m[2], ",")}
 	}
 	return 0, nil
 }
@@ -265,9 +279,9 @@ func (d *Document) parseFootnoteReference(input string, start int) (int, Node) {
 		if name == "" && definition == "" {
 			return 0, nil
 		}
-		link := FootnoteLink{name, nil}
+		link := FootnoteLink{Name: name, Definition: nil}
 		if definition != "" {
-			link.Definition = &FootnoteDefinition{name, []Node{Paragraph{d.parseInline(definition)}}, true}
+			link.Definition = &FootnoteDefinition{Name: name, Children: []Node{Paragraph{Children: d.parseInline(definition), Pos: Position{}}}, Inline: true}
 		}
 		return len(m[0]), link
 	}
@@ -276,7 +290,7 @@ func (d *Document) parseFootnoteReference(input string, start int) (int, Node) {
 
 func (d *Document) parseStatisticToken(input string, start int) (int, Node) {
 	if m := statisticsTokenRegexp.FindStringSubmatch(input[start:]); m != nil {
-		return len(m[1]) + 2, StatisticToken{m[1]}
+		return len(m[1]) + 2, StatisticToken{Content: m[1]}
 	}
 	return 0, nil
 }
@@ -304,7 +318,7 @@ func (d *Document) parseAutoLink(input string, start int) (int, int, Node) {
 	if path == "://" {
 		return 0, 0, nil
 	}
-	return len(protocol), len(path + protocol), RegularLink{protocol, nil, protocol + path, true}
+	return len(protocol), len(path + protocol), RegularLink{Protocol: protocol, Description: nil, URL: protocol + path, AutoLink: true}
 }
 
 func (d *Document) parseRegularLink(input string, start int) (int, Node) {
@@ -342,7 +356,7 @@ func (d *Document) parseTimestamp(input string, start int) (int, Node) {
 		if err != nil {
 			return 0, nil
 		}
-		timestamp := Timestamp{t, isDate, interval}
+		timestamp := Timestamp{Time: t, IsDate: isDate, Interval: interval}
 		return len(m[0]), timestamp
 	}
 	return 0, nil
@@ -360,9 +374,9 @@ func (d *Document) parseEmphasis(input string, start int, isRaw bool) (int, Node
 
 		if input[i] == marker && i != start+1 && hasValidPostAndBorderChars(input, i) {
 			if isRaw {
-				return i + 1 - start, Emphasis{input[start : start+1], d.parseRawInline(input[start+1 : i])}
+				return i + 1 - start, Emphasis{Kind: input[start : start+1], Content: d.parseRawInline(input[start+1 : i])}
 			}
-			return i + 1 - start, Emphasis{input[start : start+1], d.parseInline(input[start+1 : i])}
+			return i + 1 - start, Emphasis{Kind: input[start : start+1], Content: d.parseInline(input[start+1 : i])}
 		}
 	}
 	return 0, nil

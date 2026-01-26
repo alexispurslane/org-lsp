@@ -4,12 +4,13 @@
 // Further export formats can be defined using the Writer interface.
 //
 // You probably want to start with something like this:
-//   input := strings.NewReader("Your Org mode input")
-//   html, err := org.New().Parse(input, "./").Write(org.NewHTMLWriter())
-//   if err != nil {
-//       log.Fatalf("Something went wrong: %s", err)
-//   }
-//   log.Print(html)
+//
+//	input := strings.NewReader("Your Org mode input")
+//	html, err := org.New().Parse(input, "./").Write(org.NewHTMLWriter())
+//	if err != nil {
+//	    log.Fatalf("Something went wrong: %s", err)
+//	}
+//	log.Print(html)
 package org
 
 import (
@@ -22,6 +23,14 @@ import (
 	"strings"
 	"sync"
 )
+
+// Position represents the location of a node in the source text.
+type Position struct {
+	StartLine   int // 1-based line number where the node starts
+	StartColumn int // 1-based column number where the node starts
+	EndLine     int // 1-based line number where the node ends
+	EndColumn   int // 1-based column number where the node ends
+}
 
 type Configuration struct {
 	MaxEmphasisNewLines int                                   // Maximum number of newlines inside an emphasis. See org-emphasis-regexp-components newline.
@@ -45,6 +54,7 @@ type Document struct {
 	Outline        Outline           // Outline is a Table Of Contents for the document and contains all sections (headline + content).
 	BufferSettings map[string]string // Settings contains all settings that were parsed from keywords.
 	Error          error
+	Pos            Position // Position tracks the location of this document in the source
 }
 
 // Node represents a parsed node of the document.
@@ -57,10 +67,13 @@ type parseFn = func(*Document, int, stopFn) (int, Node)
 type stopFn = func(*Document, int) bool
 
 type token struct {
-	kind    string
-	lvl     int
-	content string
-	matches []string
+	kind     string
+	lvl      int
+	content  string
+	matches  []string
+	line     int // 1-based line number where this token starts
+	startCol int // 1-based column number where this token starts
+	endCol   int // 1-based column number where this token ends
 }
 
 var lexFns = []lexFn{
@@ -78,7 +91,7 @@ var lexFns = []lexFn{
 	lexText,
 }
 
-var nilToken = token{"nil", -1, "", nil}
+var nilToken = token{kind: "nil", lvl: -1, content: "", matches: nil}
 var orgWriterMutex = sync.Mutex{}
 var orgWriter = NewOrgWriter()
 
@@ -95,7 +108,7 @@ func New() *Configuration {
 		Log:      log.New(os.Stderr, "go-org: ", 0),
 		ReadFile: ioutil.ReadFile,
 		ResolveLink: func(protocol string, description []Node, link string) Node {
-			return RegularLink{protocol, description, link, false}
+			return RegularLink{Protocol: protocol, Description: description, URL: link, AutoLink: false}
 		},
 	}
 }
@@ -161,8 +174,15 @@ func (c *Configuration) Silent() *Configuration {
 func (d *Document) tokenize(input io.Reader) {
 	d.tokens = []token{}
 	scanner := bufio.NewScanner(input)
+	lineNum := 1
 	for scanner.Scan() {
-		d.tokens = append(d.tokens, tokenize(scanner.Text()))
+		line := scanner.Text()
+		tok := tokenize(line)
+		tok.line = lineNum
+		tok.startCol = 1
+		tok.endCol = len(line) + 1
+		d.tokens = append(d.tokens, tok)
+		lineNum++
 	}
 	if err := scanner.Err(); err != nil {
 		d.Error = fmt.Errorf("could not tokenize input: %s", err)
@@ -247,7 +267,7 @@ func (d *Document) parseOne(i int, stop stopFn) (consumed int, node Node) {
 	}
 	d.Log.Printf("Could not parse token %#v in file %s: Falling back to treating it as plain text.", d.tokens[i], d.Path)
 	m := plainTextRegexp.FindStringSubmatch(d.tokens[i].matches[0])
-	d.tokens[i] = token{"text", len(m[1]), m[2], m}
+	d.tokens[i] = token{kind: "text", lvl: len(m[1]), content: m[2], matches: m}
 	return d.parseOne(i, stop)
 }
 
