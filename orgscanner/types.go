@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/niklasfasching/go-org/org"
+	"github.com/alexispurslane/go-org/org"
 )
 
 // HeaderLocation represents the position of a header containing a specific UUID.

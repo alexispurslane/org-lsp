@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/niklasfasching/go-org/org"
+	"github.com/alexispurslane/go-org/org"
 )
 
 // ParseFile reads and parses an org-mode file relative to root, extracting metadata.
@@ -94,6 +94,18 @@ func extractTags(doc *org.Document) []string {
 	return nil
 }
 
+// normalizePosition ensures that end position is at least as valid as start position.
+// If end line/column are zero or less than start, they are set to equal start.
+func normalizePosition(pos org.Position) org.Position {
+	if pos.EndLine == 0 || pos.EndLine < pos.StartLine {
+		pos.EndLine = pos.StartLine
+	}
+	if pos.EndColumn == 0 || pos.EndColumn < pos.StartColumn {
+		pos.EndColumn = pos.StartColumn
+	}
+	return pos
+}
+
 // extractUUIDs walks the AST to find all UUIDs in property drawers.
 func extractUUIDs(doc *org.Document) FileUUIDPositions {
 	uuidToPosition := make(FileUUIDPositions)
@@ -106,7 +118,7 @@ func extractUUIDs(doc *org.Document) FileUUIDPositions {
 					if prop[0] == "ID" && prop[1] != "" {
 						id := UUID(prop[1])
 						if isValidUUID(string(id)) {
-							uuidToPosition[id] = headline.Pos
+							uuidToPosition[id] = normalizePosition(headline.Pos)
 						}
 					}
 				}
