@@ -44,3 +44,4 @@ Thumbs.db
 !*.org
 !**/*.org
 org-lsp
+testdata/

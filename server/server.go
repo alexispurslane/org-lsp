@@ -393,8 +393,11 @@ func resolveIDLink(uuid string) (any, error) {
 		return nil, nil
 	}
 
+	uuid = uuid[3:] // remove "id:"
+
 	// Look up UUID in index
-	if locInterface, found := serverState.ProcessedFiles.UuidIndex.Load(uuid); found {
+	if locInterface, found := serverState.ProcessedFiles.UuidIndex.Load(orgscanner.UUID(uuid)); found {
+		fmt.Println("Found UUID in database!")
 		if location, ok := locInterface.(orgscanner.HeaderLocation); ok {
 			// Convert to file URI
 			fileURI := "file://" + location.FilePath
