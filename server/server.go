@@ -136,6 +136,7 @@ func New() *server.Server {
 		TextDocumentDefinition: textDocumentDefinition,
 		TextDocumentHover:      textDocumentHover,
 		TextDocumentReferences: textDocumentReferences,
+		TextDocumentCompletion: textDocumentCompletion,
 	}
 	return server.NewServer(&handler, serverName, false)
 }
@@ -660,4 +661,126 @@ func findIDReferences(targetUUID string) ([]protocol.Location, error) {
 	}
 
 	return locations, nil
+}
+
+func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionParams) (any, error) {
+	if serverState == nil {
+		return nil, nil
+	}
+
+	uri := params.TextDocument.URI
+	doc, found := serverState.OpenDocs[uri]
+	if !found {
+		slog.Debug("Document not in OpenDocs", "uri", uri)
+		return nil, nil
+	}
+
+	// Check completion context - are we in "id:" or ":tag:" completion?
+	compContext := detectCompletionContext(doc, params.Position)
+
+	var items []protocol.CompletionItem
+
+	switch compContext {
+	case "id":
+		items = completeIDs()
+	case "tag":
+		items = completeTags(doc, params.Position)
+	default:
+		return nil, nil
+	}
+
+	return &protocol.CompletionList{
+		IsIncomplete: false,
+		Items:        items,
+	}, nil
+}
+
+func detectCompletionContext(doc *org.Document, pos protocol.Position) string {
+	// Check for tag context: must be on the headline line itself (where tags are)
+	headline, found := findNodeAtPosition[org.Headline](doc, pos)
+	if found {
+		// Cursor must be on the headline's first line (where the * is)
+		// Headlines span from their title line to the end of their content,
+		// so we need to check specifically if we're on line 1 of the headline
+		if headline.Pos.StartLine == int(pos.Line)+1 { // +1 because org is 1-based, LSP is 0-based
+			return "tag"
+		}
+	}
+
+	// Otherwise assume ID completion context
+	// (The trigger character ":" was typed, and we're not on a headline line)
+	return "id"
+}
+
+func completeIDs() []protocol.CompletionItem {
+	if serverState.ProcessedFiles == nil {
+		return nil
+	}
+
+	var items []protocol.CompletionItem
+
+	// Walk through all UUIDs in the index
+	serverState.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
+		uuid := string(key.(orgscanner.UUID))
+		location := value.(orgscanner.HeaderLocation)
+
+		// Find the FileInfo for this location to get the title
+		var title string
+		for _, fileInfo := range serverState.ProcessedFiles.Files {
+			if fileInfo.Path == location.FilePath {
+				title = fileInfo.Title
+				break
+			}
+		}
+
+		// Create completion item
+		kind := protocol.CompletionItemKindReference
+		item := protocol.CompletionItem{
+			Label:      uuid[:8] + "...", // Show first 8 chars for brevity
+			Kind:       &kind,
+			Detail:     &title,
+			InsertText: &uuid,
+		}
+
+		items = append(items, item)
+		return true // continue iteration
+	})
+
+	return items
+}
+
+func completeTags(doc *org.Document, pos protocol.Position) []protocol.CompletionItem {
+	if serverState.ProcessedFiles == nil {
+		return nil
+	}
+
+	var items []protocol.CompletionItem
+	seenTags := make(map[string]bool)
+
+	// Collect all unique tags from TagMap
+	serverState.ProcessedFiles.TagMap.Range(func(key, value any) bool {
+		tag := key.(string)
+
+		if !seenTags[tag] {
+			seenTags[tag] = true
+
+			kind := protocol.CompletionItemKindProperty
+			item := protocol.CompletionItem{
+				Label:      tag,
+				Kind:       &kind,
+				Detail:     strPtr("Tag"),
+				InsertText: strPtr(tag + ":"),
+			}
+
+			items = append(items, item)
+		}
+		return true
+	})
+
+	return items
+}
+
+// Helper to get string pointer
+func strPtr(s string) *string {
+	return &s
 }

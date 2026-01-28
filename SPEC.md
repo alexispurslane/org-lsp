@@ -286,15 +286,24 @@ Trigger patterns:
 - [x] Add integration tests
 - [x] **Architecture**: Reuse existing `findNodeAtPosition` pattern and shared `toProtocolLocation` conversion
 
-### Phase 5: Completion (IDs & Tags)
+### Phase 5: Completion (IDs & Tags) (In Progress)
 - [x] Advertise CompletionProvider capability
-- [ ] Detect "id:" trigger context
-- [ ] Iterate UuidIndex for ID completion
-- [ ] Detect ":" trigger in headlines for tags
-- [ ] Iterate TagMap for tag completion
-- [ ] Generate CompletionItems
-- [ ] Format for usability
-- [ ] Add integration tests
+- [x] Detect completion context (ID in any content, tags in headlines)
+- [x] Iterate UuidIndex for ID completion
+- [x] Iterate TagMap for tag completion
+- [x] Generate CompletionItems with proper formatting (truncated labels, full UUIDs)
+- [x] Add integration tests with auto-position finding
+- [ ] **Refinement**: ID completion should show heading titles (not UUIDs) as labels
+- [ ] **Refinement**: ID completion details should be hover-style context previews
+- [ ] **Refinement**: Require "id:" or "[[" prefix before cursor for ID completion
+- [ ] **Refinement**: Auto-close brackets for ID completion items
+- [ ] **Refinement**: Filter completion based on already-typed characters
+- [ ] **Refinement**: Proper tag position detection (only after text, not at beginning)
+
+**Implementation Notes**:
+- Requires go-org parser update: attach header title to HeaderLocation in UUID index
+- ID completion workflow: User sees heading titles → selects one → full UUID inserted
+- Reuse hover preview generation for completion item details
 
 ### Phase 6: Polish & Testing
 - [ ] Error handling for missing files/UUIDs

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,18 @@ import (
 	"github.com/stretchr/testify/require"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
+
+// findCursorPosition finds the line and column of a marker string in content
+// Returns 0-based line and character position (column right after the marker)
+func findCursorPosition(content, marker string) (line uint32, char uint32) {
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if idx := strings.Index(l, marker); idx >= 0 {
+			return uint32(i), uint32(idx + len(marker))
+		}
+	}
+	return 0, 0
+}
 
 func TestServerLifecycle(t *testing.T) {
 	// Setup test directory
@@ -626,6 +639,170 @@ Different file with [[id:11111111-1111-1111-1111-111111111111][another reference
 		err = jsonrpcConn.Call(ctx, "textDocument/hover", hoverParams, &result)
 		require.NoError(t, err, "Hover request failed")
 		require.Nil(t, result, "Expected nil hover for non-link text")
+	})
+
+	// Test 8: Completion (IDs & Tags)
+	t.Run("Completion", func(t *testing.T) {
+		t.Log("Testing completion for IDs and tags...")
+
+		// Create test files with UUIDs and tags
+		targetFile := "testdata/completion-target.org"
+		absTargetFile, _ := filepath.Abs(targetFile)
+		targetContent := `* Target Heading :testtag:anothertag:
+	:PROPERTIES:
+	:ID:       22222222-2222-2222-2222-222222222222
+	:END:
+	Content here.`
+
+		err := os.WriteFile(targetFile, []byte(targetContent), 0644)
+		require.NoError(t, err, "Failed to create target file")
+		defer os.Remove(targetFile)
+
+		// Re-scan to index the new file
+		didSaveParams := protocol.DidSaveTextDocumentParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absTargetFile),
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didSave", didSaveParams); err != nil {
+			t.Fatalf("Failed to send didSave for target: %v", err)
+		}
+
+		time.Sleep(200 * time.Millisecond) // Wait for re-scan
+
+		// Test ID completion - file must have "id:" to trigger it
+		idSourceFile := "testdata/completion-id-source.org"
+		absIDSourceFile, _ := filepath.Abs(idSourceFile)
+		idSourceContent := "* Source Heading\nSome text with id:" // Cursor goes after "id:"
+
+		err = os.WriteFile(idSourceFile, []byte(idSourceContent), 0644)
+		require.NoError(t, err, "Failed to create ID source file")
+		defer os.Remove(idSourceFile)
+
+		// Create tag source file for tag completion test
+		tagSourceFile := "testdata/completion-tag-source.org"
+		absTagSourceFile, _ := filepath.Abs(tagSourceFile)
+		tagSourceContent := "* Source Heading :" // Cursor goes after ":" for tag completion
+
+		err = os.WriteFile(tagSourceFile, []byte(tagSourceContent), 0644)
+		require.NoError(t, err, "Failed to create tag source file")
+		defer os.Remove(tagSourceFile)
+
+		// Find cursor positions using helper
+		idLine, idChar := findCursorPosition(idSourceContent, "id:")
+		tagLine, tagChar := findCursorPosition(tagSourceContent, ":")
+
+		// Open ID document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absIDSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       idSourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open ID source file: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		// Test ID completion - cursor positioned AFTER "id:"
+		t.Log("Testing ID completion...")
+		idCompletionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absIDSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      idLine,
+					Character: idChar,
+				},
+			},
+		}
+
+		var completionResult *protocol.CompletionList
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", idCompletionParams, &completionResult)
+		require.NoError(t, err, "Completion request failed")
+		require.NotNil(t, completionResult, "Expected completion result, got nil - document may not be in OpenDocs")
+
+		// Find ID completion items
+		var idItems []protocol.CompletionItem
+		for _, item := range completionResult.Items {
+			if item.Kind != nil && *item.Kind == protocol.CompletionItemKindReference {
+				idItems = append(idItems, item)
+			}
+		}
+		require.NotEmpty(t, idItems, "Expected ID completion items")
+
+		// Find our test UUID
+		foundTestUUID := false
+		for _, item := range idItems {
+			if item.InsertText != nil && *item.InsertText == "22222222-2222-2222-2222-222222222222" {
+				foundTestUUID = true
+				require.Equal(t, "22222222...", item.Label, "Expected truncated UUID label")
+				break
+			}
+		}
+		require.True(t, foundTestUUID, "Expected to find test UUID in completion")
+
+		// Test tag completion in headline - need to open tag file
+		t.Log("Testing tag completion...")
+		tagDidOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absTagSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       tagSourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", tagDidOpenParams); err != nil {
+			t.Fatalf("Failed to open tag source file: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		tagCompletionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absTagSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      tagLine,
+					Character: tagChar,
+				},
+			},
+		}
+
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", tagCompletionParams, &completionResult)
+		require.NoError(t, err, "Tag completion request failed")
+		require.NotNil(t, completionResult, "Expected tag completion result")
+
+		// Find tag completion items
+		var tagItems []protocol.CompletionItem
+		for _, item := range completionResult.Items {
+			if item.Kind != nil && *item.Kind == protocol.CompletionItemKindProperty {
+				tagItems = append(tagItems, item)
+			}
+		}
+		require.NotEmpty(t, tagItems, "Expected tag completion items")
+
+		// Check for our test tags
+		foundTestTag := false
+		foundAnotherTag := false
+		for _, item := range tagItems {
+			if item.Label == "testtag" {
+				foundTestTag = true
+				break
+			}
+		}
+		for _, item := range tagItems {
+			if item.Label == "anothertag" {
+				foundAnotherTag = true
+				break
+			}
+		}
+		require.True(t, foundTestTag && foundAnotherTag, "Expected to find test tags in completion")
 	})
 
 	// Test 4: Shutdown
