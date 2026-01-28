@@ -4,6 +4,7 @@ package server
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -37,7 +38,83 @@ type State struct {
 	DocVersions map[protocol.DocumentUri]int32
 }
 
-// LinkNode represents a link node in the org-mode AST with its position
+// Generic helper to find a node of type T at a given cursor position
+func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*T, bool) {
+	if doc == nil {
+		var zero T
+		return &zero, false
+	}
+
+	targetLine := int(pos.Line) + 1     // Convert to 1-based for org.Position
+	targetCol := int(pos.Character) + 1 // Convert to 1-based for org.Position
+
+	var foundNode *T
+
+	var walkNodes func(node org.Node, currentDepth int)
+	walkNodes = func(node org.Node, currentDepth int) {
+		if foundNode != nil {
+			return // Already found, stop searching
+		}
+
+		// Use reflection to access Pos field on any node type
+		nodeVal := reflect.ValueOf(node)
+		var nodePos org.Position
+		hasPos := false
+
+		if nodeVal.Kind() == reflect.Struct {
+			posField := nodeVal.FieldByName("Pos")
+			if posField.IsValid() && posField.Type() == reflect.TypeFor[org.Position]() {
+				nodePos = posField.Interface().(org.Position)
+				hasPos = true
+			}
+		}
+
+		if !hasPos {
+			// Always walk children even without position info
+			if children := getChildren(node); children != nil {
+				for _, child := range children {
+					walkNodes(child, currentDepth+1)
+				}
+			}
+			return
+		}
+
+		// Check if cursor is within this node's range
+		cursorInNode := targetLine >= nodePos.StartLine && targetLine <= nodePos.EndLine &&
+			targetCol >= nodePos.StartColumn && targetCol <= nodePos.EndColumn
+
+		if cursorInNode {
+			// Check if this node matches the target type
+			if typedNode, ok := node.(T); ok {
+				foundNode = &typedNode
+				return
+			}
+
+			// Not the target type, but cursor is here - walk children to go deeper
+			if children := getChildren(node); children != nil {
+				for _, child := range children {
+					walkNodes(child, currentDepth+1)
+				}
+			}
+		}
+	}
+
+	// Walk all document nodes
+	for _, node := range doc.Nodes {
+		walkNodes(node, 0)
+		if foundNode != nil {
+			break
+		}
+	}
+
+	if foundNode != nil {
+		return foundNode, true
+	}
+
+	var zero T
+	return &zero, false
+}
+
 type LinkNode struct {
 	Node     org.Node
 	URL      string
@@ -57,12 +134,31 @@ func New() *server.Server {
 		TextDocumentDidClose:   textDocumentDidClose,
 		TextDocumentDidSave:    textDocumentDidSave,
 		TextDocumentDefinition: textDocumentDefinition,
+		TextDocumentHover:      textDocumentHover,
+		TextDocumentReferences: textDocumentReferences,
 	}
 	return server.NewServer(&handler, serverName, false)
 }
 
 // initialize handles the LSP initialize request.
 func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, error) {
+	// Configure logging level from environment
+	logLevel := os.Getenv("ORG_LSP_LOG_LEVEL")
+	level := slog.LevelInfo // default
+	if logLevel != "" {
+		switch logLevel {
+		case "DEBUG":
+			level = slog.LevelDebug
+		case "INFO":
+			level = slog.LevelInfo
+		case "WARN":
+			level = slog.LevelWarn
+		case "ERROR":
+			level = slog.LevelError
+		}
+	}
+	slog.SetLogLoggerLevel(level)
+
 	serverState = &State{}
 	serverState.OpenDocs = make(map[protocol.DocumentUri]*org.Document)
 	serverState.DocVersions = make(map[protocol.DocumentUri]int32)
@@ -209,7 +305,6 @@ func textDocumentDidSave(context *glsp.Context, params *protocol.DidSaveTextDocu
 	return nil
 }
 
-// textDocumentDefinition handles the LSP textDocument/definition request.
 func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionParams) (any, error) {
 	if serverState == nil {
 		return nil, nil
@@ -222,118 +317,59 @@ func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionPa
 		return nil, nil
 	}
 
-	// Find link at cursor position
-	linkNode := findLinkAtPosition(doc, params.Position)
-	if linkNode == nil {
+	// Find link at cursor position using generic helper
+	linkNode, foundLink := findNodeAtPosition[org.RegularLink](doc, params.Position)
+	if !foundLink {
 		return nil, nil
 	}
 
-	// Resolve based on link type
+	var filePath string
+	var pos org.Position
+	var err error
+
 	switch linkNode.Protocol {
 	case "file":
-		return resolveFileLink(uri, linkNode.URL)
+		filePath, pos, err = resolveFileLink(uri, linkNode.URL)
 	case "id":
-		return resolveIDLink(linkNode.URL)
+		filePath, pos, err = resolveIDLink(uri, linkNode.URL)
+	default:
+		return nil, nil
 	}
 
-	return nil, nil
+	if err != nil {
+		return nil, nil
+	}
+
+	return toProtocolLocation(filePath, pos)
 }
 
-// findLinkAtPosition searches the AST for a RegularLink node at the given position
-func findLinkAtPosition(doc *org.Document, pos protocol.Position) *LinkNode {
-	if doc == nil {
-		return nil
+// toProtocolLocation converts an org.Position to a protocol.Location
+func toProtocolLocation(filePath string, pos org.Position) (protocol.Location, error) {
+	// Convert to absolute path and file URI
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return protocol.Location{}, err
 	}
+	fileURI := "file://" + absPath
 
-	targetLine := int(pos.Line) + 1     // Convert to 1-based for org.Position
-	targetCol := int(pos.Character) + 1 // Convert to 1-based for org.Position
+	return protocol.Location{
+		URI:   protocol.DocumentUri(fileURI),
+		Range: toProtocolRange(pos),
+	}, nil
+}
 
-	slog.Info("Searching for link at position", "line", targetLine, "col", targetCol, "docNodes", len(doc.Nodes))
+// toProtocolRange converts an org.Position to a protocol.Range
+func toProtocolRange(pos org.Position) protocol.Range {
+	// Convert from 1-based (org) to 0-based (LSP) coordinates
+	startLine := uint32(pos.StartLine - 1)
+	startCol := uint32(pos.StartColumn - 1)
+	endLine := uint32(pos.EndLine - 1)
+	endCol := uint32(pos.EndColumn - 1)
 
-	var foundLink *LinkNode
-	var depth int
-
-	var walkNodes func(node org.Node, currentDepth int)
-	walkNodes = func(node org.Node, currentDepth int) {
-		depth = currentDepth
-		if foundLink != nil {
-			return // Already found, stop searching
-		}
-
-		// Use reflection to access Pos field on any node type
-		nodeVal := reflect.ValueOf(node)
-		var nodePos org.Position
-		hasPos := false
-
-		if nodeVal.Kind() == reflect.Struct {
-			posField := nodeVal.FieldByName("Pos")
-			if posField.IsValid() && posField.Type() == reflect.TypeFor[org.Position]() {
-				nodePos = posField.Interface().(org.Position)
-				hasPos = true
-				slog.Info("Walking node", "depth", currentDepth, "type", fmt.Sprintf("%T", node), "pos", fmt.Sprintf("(%d,%d)-(%d,%d)", nodePos.StartLine, nodePos.StartColumn, nodePos.EndLine, nodePos.EndColumn))
-			}
-		}
-
-		if !hasPos {
-			slog.Info("Walking node without position", "depth", currentDepth, "type", fmt.Sprintf("%T", node))
-			// Always walk children even without position info
-			if children := getChildren(node); children != nil {
-				slog.Info("Walking children for node without position", "depth", currentDepth, "type", fmt.Sprintf("%T", node), "childCount", len(children))
-				for i, child := range children {
-					slog.Info("Processing child", "depth", currentDepth, "childIndex", i, "childType", fmt.Sprintf("%T", child))
-					walkNodes(child, currentDepth+1)
-				}
-			}
-			return
-		}
-
-		// Check if cursor is within this node's range
-		cursorInNode := targetLine >= nodePos.StartLine && targetLine <= nodePos.EndLine &&
-			targetCol >= nodePos.StartColumn && targetCol <= nodePos.EndColumn
-
-		if cursorInNode {
-			// Check if this node is a RegularLink
-			if link, ok := node.(org.RegularLink); ok {
-				// Log link details
-				slog.Info("Found RegularLink", "url", link.URL, "protocol", link.Protocol, "pos", fmt.Sprintf("(%d,%d)-(%d,%d)", link.Pos.StartLine, link.Pos.StartColumn, link.Pos.EndLine, link.Pos.EndColumn))
-
-				slog.Info("Found link at cursor position", "url", link.URL, "protocol", link.Protocol)
-				foundLink = &LinkNode{
-					Node:     node,
-					URL:      link.URL,
-					Protocol: link.Protocol,
-					Position: link.Pos,
-				}
-				return
-			}
-
-			// Not a link, but cursor is here - walk children to go deeper
-			if children := getChildren(node); children != nil {
-				slog.Info("Walking children for cursor-containing node", "depth", currentDepth, "type", fmt.Sprintf("%T", node), "childCount", len(children))
-				for i, child := range children {
-					slog.Info("Processing child", "depth", currentDepth, "childIndex", i, "childType", fmt.Sprintf("%T", child))
-					walkNodes(child, currentDepth+1)
-				}
-			}
-		}
+	return protocol.Range{
+		Start: protocol.Position{Line: startLine, Character: startCol},
+		End:   protocol.Position{Line: endLine, Character: endCol},
 	}
-
-	// Walk all document nodes
-	slog.Info("Starting AST walk", "topLevelNodeCount", len(doc.Nodes))
-	for i, node := range doc.Nodes {
-		slog.Info("Walking top-level node", "index", i, "type", fmt.Sprintf("%T", node))
-		walkNodes(node, 0)
-		if foundLink != nil {
-			slog.Info("Found link, stopping walk early")
-			break
-		}
-	}
-
-	if foundLink == nil {
-		slog.Info("No link found at position", "line", targetLine, "col", targetCol, "finalDepth", depth)
-	}
-
-	return foundLink
 }
 
 // getChildren extracts child nodes from a node if it has them
@@ -358,66 +394,83 @@ func getChildren(node org.Node) []org.Node {
 	}
 }
 
-// resolveFileLink resolves a file: link to an absolute path
-func resolveFileLink(currentURI protocol.DocumentUri, linkURL string) (any, error) {
-	// Convert URI to path
-	currentPath := string(currentURI)[7:] // Remove file:// prefix
+// resolveFileLink resolves a file: link to an absolute path and returns the target position
+func resolveFileLink(currentURI protocol.DocumentUri, linkURL string) (string, org.Position, error) {
+	slog.Debug("Resolving file link", "currentURI", currentURI, "linkURL", linkURL)
 
-	// Resolve relative to current document directory
-	if !strings.HasPrefix(linkURL, "/") {
+	// Convert URI to path and remove file:// prefix
+	currentPath := string(currentURI)[7:]
+
+	// Remove the org-mode file: prefix
+	linkURL = strings.TrimPrefix(linkURL, "file:")
+
+	// Handle tilde expansion (~ -> home directory)
+	if strings.HasPrefix(linkURL, "~/") {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			linkURL = filepath.Join(homeDir, linkURL[2:])
+		} else {
+			return "", org.Position{}, fmt.Errorf("failed to expand home directory: %w", err)
+		}
+	}
+
+	// Resolve environment variables (e.g., $HOME, $ORG_DIR)
+	linkURL = os.ExpandEnv(linkURL)
+
+	// If path is not absolute, resolve relative to current document directory
+	if !filepath.IsAbs(linkURL) {
 		currentDir := filepath.Dir(currentPath)
 		linkURL = filepath.Join(currentDir, linkURL)
 	}
 
-	absPath, err := filepath.Abs(linkURL)
-	if err != nil {
-		return nil, nil
+	// Clean the path (resolve . and ..)
+	linkURL = filepath.Clean(linkURL)
+
+	slog.Debug("Resolved file link path", "currentPath", currentPath, "resolvedPath", linkURL)
+
+	// For file links, return position at start of file
+	pos := org.Position{
+		StartLine:   1,
+		StartColumn: 1,
+		EndLine:     1,
+		EndColumn:   1,
 	}
 
-	// Convert to file URI
-	fileURI := "file://" + absPath
-
-	// For MVP, return location pointing to start of file
-	return protocol.Location{
-		URI: protocol.DocumentUri(fileURI),
-		Range: protocol.Range{
-			Start: protocol.Position{Line: 0, Character: 0},
-			End:   protocol.Position{Line: 0, Character: 0},
-		},
-	}, nil
+	return linkURL, pos, nil
 }
 
-// resolveIDLink resolves an id: link via UUID index
-func resolveIDLink(uuid string) (any, error) {
+// resolveIDLink resolves an id: link via UUID index and returns the target position
+func resolveIDLink(currentURI protocol.DocumentUri, uuid string) (string, org.Position, error) {
 	if serverState.ProcessedFiles == nil {
-		return nil, nil
+		return "", org.Position{}, fmt.Errorf("no processed files")
 	}
 
 	uuid = uuid[3:] // remove "id:"
 
 	// Look up UUID in index
-	if locInterface, found := serverState.ProcessedFiles.UuidIndex.Load(orgscanner.UUID(uuid)); found {
-		fmt.Println("Found UUID in database!")
-		if location, ok := locInterface.(orgscanner.HeaderLocation); ok {
-			// Convert to file URI
-			fileURI := "file://" + location.FilePath
-
-			// Use the stored position (1-based line numbers from orgscanner)
-			line := uint32(location.Position.StartLine - 1)
-			col := uint32(location.Position.StartColumn - 1)
-
-			return protocol.Location{
-				URI: protocol.DocumentUri(fileURI),
-				Range: protocol.Range{
-					Start: protocol.Position{Line: line, Character: col},
-					End:   protocol.Position{Line: line, Character: col},
-				},
-			}, nil
-		}
+	locInterface, found := serverState.ProcessedFiles.UuidIndex.Load(orgscanner.UUID(uuid))
+	if !found {
+		return "", org.Position{}, fmt.Errorf("UUID not found")
 	}
 
-	// UUID not found
-	return nil, nil
+	location, ok := locInterface.(orgscanner.HeaderLocation)
+	if !ok {
+		return "", org.Position{}, fmt.Errorf("UUID not found")
+	}
+
+	// Resolve relative path to absolute using workspace root
+	if serverState.OrgScanRoot == "" {
+		return "", org.Position{}, fmt.Errorf("no workspace root configured")
+	}
+
+	// The FilePath stored in HeaderLocation is relative to OrgScanRoot
+	absPath := filepath.Join(serverState.OrgScanRoot, location.FilePath)
+
+	// Clean the path (resolve . and ..)
+	absPath = filepath.Clean(absPath)
+
+	slog.Debug("Resolved ID link path", "relativePath", location.FilePath, "absPath", absPath, "orgScanRoot", serverState.OrgScanRoot)
+
+	return absPath, location.Position, nil
 }
 
 // countUUIDs returns the total number of UUIDs in the ProcessedFiles.
@@ -428,4 +481,183 @@ func countUUIDs(procFiles *orgscanner.ProcessedFiles) int {
 		return true
 	})
 	return count
+}
+
+// textDocumentHover handles the LSP textDocument/hover request
+func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	if serverState == nil {
+		return nil, nil
+	}
+
+	uri := params.TextDocument.URI
+	doc, found := serverState.OpenDocs[uri]
+	if !found {
+		return nil, nil
+	}
+
+	// Find link at cursor position
+	linkNode, foundLink := findNodeAtPosition[org.RegularLink](doc, params.Position)
+	if !foundLink {
+		return nil, nil
+	}
+
+	// Resolve link to get target position
+	var filePath string
+	var targetPos org.Position
+	var err error
+
+	switch linkNode.Protocol {
+	case "file":
+		filePath, targetPos, err = resolveFileLink(uri, linkNode.URL)
+	case "id":
+		filePath, targetPos, err = resolveIDLink(uri, linkNode.URL)
+	default:
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, nil
+	}
+
+	slog.Info("Resolved link absolute path and position", "path", filePath, "pos", targetPos)
+
+	// Build hover content
+	content := fmt.Sprintf("**%s Link**\n\nTarget: `%s`", strings.ToUpper(linkNode.Protocol), filepath.Base(filePath))
+
+	// Extract context lines from target document
+	contextLines := extractContextLines(filePath, targetPos)
+	slog.Info("Context extraction result", "hasContent", contextLines != "", "length", len(contextLines))
+	if contextLines != "" {
+		content += fmt.Sprintf("\n\n```org\n%s\n```", contextLines)
+	}
+
+	// Calculate hover range from link node
+	hoverRange := toProtocolRange(linkNode.Pos)
+	hoverRangePtr := &hoverRange
+
+	return &protocol.Hover{
+		Contents: protocol.MarkupContent{
+			Kind:  protocol.MarkupKindMarkdown,
+			Value: content,
+		},
+		Range: hoverRangePtr,
+	}, nil
+}
+
+// extractContextLines extracts ±3 lines of context around the target position
+func extractContextLines(filePath string, targetPos org.Position) string {
+	// Debug logging
+	slog.Debug("Extracting context lines", "filePath", filePath, "targetPos", targetPos)
+
+	// Read file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		slog.Debug("Failed to read file for context extraction", "filePath", filePath, "error", err)
+		return ""
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if len(lines) == 0 {
+		slog.Debug("File has no lines", "filePath", filePath)
+		return ""
+	}
+
+	// Debug: log file size and line count
+	slog.Debug("File read successfully", "filePath", filePath, "lineCount", len(lines))
+
+	// Calculate line range (±3 lines, 1-based to 0-based)
+	startLine := max(0, targetPos.StartLine-4)        // -3 lines  convert to 0-based
+	endLine := min(len(lines), targetPos.StartLine+2) // 3 lines, inclusive
+
+	// Extract and join context lines
+	var context strings.Builder
+	for i := startLine; i < endLine; i++ {
+		if i > startLine {
+			context.WriteString("\n")
+		}
+		context.WriteString(lines[i])
+	}
+
+	result := context.String()
+	slog.Debug("Context extraction complete", "filePath", filePath, "contextLength", len(result), "lines", endLine-startLine)
+	return result
+}
+
+func textDocumentReferences(context *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	if serverState == nil {
+		return nil, nil
+	}
+
+	uri := params.TextDocument.URI
+	doc, found := serverState.OpenDocs[uri]
+	if !found {
+		slog.Debug("Document not in OpenDocs", "uri", uri)
+		return nil, nil
+	}
+
+	// Find headline at cursor position
+	headline, foundHeadline := findNodeAtPosition[org.Headline](doc, params.Position)
+	if !foundHeadline {
+		return nil, nil
+	}
+
+	// Extract UUID from headline properties
+	for _, prop := range headline.Properties.Properties {
+		if prop[0] == "ID" && prop[1] != "" {
+			uuid := prop[1]
+			return findIDReferences(uuid)
+		}
+	}
+
+	return nil, nil
+}
+
+func findIDReferences(targetUUID string) ([]protocol.Location, error) {
+	if serverState.ProcessedFiles == nil {
+		return nil, nil
+	}
+
+	var locations []protocol.Location
+
+	// Walk through all processed files
+	for _, fileInfo := range serverState.ProcessedFiles.Files {
+		if fileInfo.ParsedOrg == nil {
+			continue
+		}
+
+		// Search for links in this file
+		var walkNodes func(node org.Node)
+		walkNodes = func(node org.Node) {
+			if link, ok := node.(org.RegularLink); ok {
+				// Check if this is an id: link
+				if linkUUID, ok0 := strings.CutPrefix(link.URL, "id:"); ok0 {
+					if linkUUID == targetUUID {
+						// Convert link position to absolute file path
+						absPath := filepath.Join(serverState.OrgScanRoot, fileInfo.Path)
+						absPath = filepath.Clean(absPath)
+
+						loc, err := toProtocolLocation(absPath, link.Pos)
+						if err != nil {
+							slog.Debug("Failed to convert link to protocol location", "error", err)
+							return
+						}
+						locations = append(locations, loc)
+					}
+				}
+			}
+
+			// Walk children
+			if children := getChildren(node); children != nil {
+				for _, child := range children {
+					walkNodes(child)
+				}
+			}
+		}
+
+		for _, node := range fileInfo.ParsedOrg.Nodes {
+			walkNodes(node)
+		}
+	}
+
+	return locations, nil
 }

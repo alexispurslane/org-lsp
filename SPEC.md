@@ -252,45 +252,56 @@ Trigger patterns:
 - [x] Position normalization
 - [x] Server stub with glsp integration
 
-### Phase 1: Core LSP Setup
+### Phase 1: Core LSP Setup ✅ (Complete)
 - [x] Wire up lifecycle handlers (initialize, shutdown)
-- [ ] Implement document sync (open, change, close)
-- [ ] Configure server capabilities correctly
-- [ ] Handle workspace root initialization
-- [ ] Call orgscanner.Process(root) at startup
+- [x] Implement document sync (open, save)
+- [x] Implement document sync (change, close)
+- [x] Configure server capabilities correctly
+- [x] Handle workspace root initialization
+- [x] Call orgscanner.Process(root) at startup
 
-### Phase 2: Go-to-Definition
-- [ ] Implement link detection regex/parser
-- [ ] Handle `file:` link resolution
-- [ ] Handle `id:` link resolution via UuidIndex
-- [ ] Convert org Positions to LSP Positions/Ranges
-- [ ] Test with real org files
+### Phase 2: Go-to-Definition ✅ (Complete)
+- [x] Implement link detection via AST walking
+- [x] Handle `file:` link resolution
+- [x] Handle `id:` link resolution via UuidIndex
+- [x] Convert org Positions to LSP Positions/Ranges
+- [x] Test with real org files
 
-### Phase 3: Hover Previews
-- [ ] Detect links under cursor
-- [ ] Return FileInfo.Preview for file links
-- [ ] Return FileInfo.Preview for ID links
-- [ ] Format as Markdown
+### Phase 3: Hover Previews ✅ (Complete)
+- [x] Advertise HoverProvider capability
+- [x] Implement link detection for hover
+- [x] Return FileInfo.Preview for file links
+- [x] Return FileInfo.Preview for ID links
+- [x] Format as Markdown
+- [x] Add integration tests
+- [x] **Enhanced**: Extract actual context lines from target files
+- [x] **Refactored**: Shared path resolution logic between definition and hover, resolve ~ and environment variables for file links as part of that
 
-### Phase 4: Backlinks (References)
-- [ ] Extract UUID from current headline
-- [ ] Implement regex search for ID references
-- [ ] Parse referenced files to find link positions
-- [ ] Return location array
+### Phase 4: Backlinks (References) ✅ (Complete)
+- [x] Advertise ReferencesProvider capability
+- [x] Extract UUID from current headline
+- [x] Implement AST walking search for ID references
+- [x] Parse referenced files to find link positions
+- [x] Return location array with file URIs and ranges
+- [x] Add integration tests
+- [x] **Architecture**: Reuse existing `findNodeAtPosition` pattern and shared `toProtocolLocation` conversion
 
 ### Phase 5: Completion (IDs & Tags)
+- [x] Advertise CompletionProvider capability
 - [ ] Detect "id:" trigger context
 - [ ] Iterate UuidIndex for ID completion
 - [ ] Detect ":" trigger in headlines for tags
 - [ ] Iterate TagMap for tag completion
 - [ ] Generate CompletionItems
 - [ ] Format for usability
+- [ ] Add integration tests
 
 ### Phase 6: Polish & Testing
 - [ ] Error handling for missing files/UUIDs
 - [ ] Performance optimization (lazy loading?)
 - [ ] Configurable workspace scanning
-- [ ] Integration testing with real editors
+- [ ] Document sync for change/close handlers
+- [ ] Integration testing with real editors (Emacs/Zed)
 
 ### Logging Strategy
 

@@ -22,10 +22,15 @@ server: build
     @echo "Starting org-lsp..."
     ./bin/org-lsp
 
-# Run the LSP server tests
-test: build
+# Run the LSP server tests (optional filter argument)
+test filter="":
     @echo "Running LSP server integration tests..."
-    go test -v ./...
+    ORG_LSP_LOG_LEVEL=INFO go test -v -run="{{filter}}" ./...
+
+# Run tests quietly (no INFO logs, optional filter argument)
+test-quiet filter="":
+    @echo "Running tests quietly..."
+    ORG_LSP_LOG_LEVEL=ERROR go test -v -run="{{filter}}" ./...
 
 # Run all Go tests
 test-unit:
