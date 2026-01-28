@@ -293,17 +293,20 @@ Trigger patterns:
 - [x] Iterate TagMap for tag completion
 - [x] Generate CompletionItems with proper formatting (truncated labels, full UUIDs)
 - [x] Add integration tests with auto-position finding
-- [ ] **Refinement**: ID completion should show heading titles (not UUIDs) as labels
-- [ ] **Refinement**: ID completion details should be hover-style context previews
-- [ ] **Refinement**: Require "id:" or "[[" prefix before cursor for ID completion
-- [ ] **Refinement**: Auto-close brackets for ID completion items
-- [ ] **Refinement**: Filter completion based on already-typed characters
-- [ ] **Refinement**: Proper tag position detection (only after text, not at beginning)
+- [x] **Refinement**: ID completion shows heading titles (not UUIDs) as labels
+- [x] **Refinement**: ID completion details use hover-style context previews
+- [x] **Refinement**: Require "[[id:" prefix before cursor for ID completion
+- [x] **Refinement**: Auto-close brackets for ID completion items (only if ]] not already present)
+- [x] **Refinement**: Filter completion based on already-typed characters
+- [x] **Refinement**: Proper tag position detection (only after text, not at beginning)
 
 **Implementation Notes**:
-- Requires go-org parser update: attach header title to HeaderLocation in UUID index
-- ID completion workflow: User sees heading titles → selects one → full UUID inserted
-- Reuse hover preview generation for completion item details
+- go-org parser updated: HeaderLocation now includes Title field
+- ID completion workflow: Type `[[id:` → see heading titles → select one → full UUID inserted with `]]` if needed
+- Only `[[id:` triggers completion (not bare `id:` or `[[`)
+- Brackets auto-close only when `]]` doesn't already exist after cursor
+- Reused hover preview generation (extracted to shared functions) for completion item details
+- Header context shows header line + content below (not arbitrary context above)
 
 ### Phase 6: Polish & Testing
 - [ ] Error handling for missing files/UUIDs

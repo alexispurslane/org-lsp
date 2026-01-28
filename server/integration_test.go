@@ -670,10 +670,10 @@ Different file with [[id:11111111-1111-1111-1111-111111111111][another reference
 
 		time.Sleep(200 * time.Millisecond) // Wait for re-scan
 
-		// Test ID completion - file must have "id:" to trigger it
+		// Test ID completion - file must have "[[id:" to trigger it
 		idSourceFile := "testdata/completion-id-source.org"
 		absIDSourceFile, _ := filepath.Abs(idSourceFile)
-		idSourceContent := "* Source Heading\nSome text with id:" // Cursor goes after "id:"
+		idSourceContent := "* Source Heading\nSome text with [[id:" // Cursor goes after "[[id:"
 
 		err = os.WriteFile(idSourceFile, []byte(idSourceContent), 0644)
 		require.NoError(t, err, "Failed to create ID source file")
@@ -689,7 +689,7 @@ Different file with [[id:11111111-1111-1111-1111-111111111111][another reference
 		defer os.Remove(tagSourceFile)
 
 		// Find cursor positions using helper
-		idLine, idChar := findCursorPosition(idSourceContent, "id:")
+		idLine, idChar := findCursorPosition(idSourceContent, "[[id:")
 		tagLine, tagChar := findCursorPosition(tagSourceContent, ":")
 
 		// Open ID document
@@ -735,12 +735,13 @@ Different file with [[id:11111111-1111-1111-1111-111111111111][another reference
 		}
 		require.NotEmpty(t, idItems, "Expected ID completion items")
 
-		// Find our test UUID
+		// Find our test UUID - completion now shows heading titles, inserts UUIDs
 		foundTestUUID := false
 		for _, item := range idItems {
-			if item.InsertText != nil && *item.InsertText == "22222222-2222-2222-2222-222222222222" {
+			if item.InsertText != nil && strings.HasPrefix(*item.InsertText, "22222222-2222-2222-2222-222222222222") {
 				foundTestUUID = true
-				require.Equal(t, "22222222...", item.Label, "Expected truncated UUID label")
+				// Label should be the heading title, not the UUID
+				require.Equal(t, "Target Heading", item.Label, "Expected heading title as label")
 				break
 			}
 		}
@@ -803,6 +804,284 @@ Different file with [[id:11111111-1111-1111-1111-111111111111][another reference
 			}
 		}
 		require.True(t, foundTestTag && foundAnotherTag, "Expected to find test tags in completion")
+
+		// Test bracket closing for [[id: context
+		t.Log("Testing bracket closing in [[id: context...")
+		bracketSourceFile := "testdata/completion-bracket-source.org"
+		absBracketSourceFile, _ := filepath.Abs(bracketSourceFile)
+		bracketSourceContent := "* Bracket Test\nSome text [[id:"
+
+		err = os.WriteFile(bracketSourceFile, []byte(bracketSourceContent), 0644)
+		require.NoError(t, err, "Failed to create bracket source file")
+		defer os.Remove(bracketSourceFile)
+
+		// Find cursor position after "[[id:"
+		bracketLine, bracketChar := findCursorPosition(bracketSourceContent, "[[id:")
+
+		// Open bracket document
+		bracketDidOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absBracketSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       bracketSourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", bracketDidOpenParams); err != nil {
+			t.Fatalf("Failed to open bracket source file: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		bracketCompletionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absBracketSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      bracketLine,
+					Character: bracketChar,
+				},
+			},
+		}
+
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", bracketCompletionParams, &completionResult)
+		require.NoError(t, err, "Bracket completion request failed")
+		require.NotNil(t, completionResult, "Expected bracket completion result")
+
+		// Verify bracket completion items have closing brackets when none exist
+		foundBracketItem := false
+		for _, item := range completionResult.Items {
+			if item.Kind != nil && *item.Kind == protocol.CompletionItemKindReference {
+				foundBracketItem = true
+				// Should have ]] suffix
+				require.NotNil(t, item.InsertText, "Expected InsertText")
+				require.True(t, strings.HasSuffix(*item.InsertText, "]]"),
+					"Expected InsertText to end with ]], got %s", *item.InsertText)
+				break
+			}
+		}
+		require.True(t, foundBracketItem, "Expected ID completion items with bracket closing")
+
+		// Test NO bracket closing when closing brackets already exist
+		t.Log("Testing no bracket closing when ]] already exists...")
+		existingBracketSourceFile := "testdata/completion-existing-bracket-source.org"
+		absExistingBracketSourceFile, _ := filepath.Abs(existingBracketSourceFile)
+		existingBracketSourceContent := "* Existing Bracket Test\nSome text [[id:]] more"
+
+		err = os.WriteFile(existingBracketSourceFile, []byte(existingBracketSourceContent), 0644)
+		require.NoError(t, err, "Failed to create existing bracket source file")
+		defer os.Remove(existingBracketSourceFile)
+
+		// Find cursor position after "[[id:" but before "]]"
+		existingBracketLine, existingBracketChar := findCursorPosition(existingBracketSourceContent, "[[id:")
+
+		// Open existing bracket document
+		existingBracketDidOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absExistingBracketSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       existingBracketSourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", existingBracketDidOpenParams); err != nil {
+			t.Fatalf("Failed to open existing bracket source file: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		existingBracketCompletionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absExistingBracketSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      existingBracketLine,
+					Character: existingBracketChar,
+				},
+			},
+		}
+
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", existingBracketCompletionParams, &completionResult)
+		require.NoError(t, err, "Existing bracket completion request failed")
+
+		if completionResult != nil && len(completionResult.Items) > 0 {
+			// Verify bracket completion items do NOT have closing brackets when they already exist
+			for _, item := range completionResult.Items {
+				if item.Kind != nil && *item.Kind == protocol.CompletionItemKindReference {
+					require.NotNil(t, item.InsertText, "Expected InsertText")
+					require.False(t, strings.HasSuffix(*item.InsertText, "]]"),
+						"Expected InsertText to NOT end with ]] when brackets already exist, got %s", *item.InsertText)
+					break
+				}
+			}
+		}
+
+		// Test filtering by header title
+		t.Log("Testing filtering by header title...")
+		filterSourceFile := "testdata/completion-filter-source.org"
+		absFilterSourceFile, _ := filepath.Abs(filterSourceFile)
+		filterSourceContent := "* Filter Test\nSome text [[id:Target" // Filter for "Target"
+
+		err = os.WriteFile(filterSourceFile, []byte(filterSourceContent), 0644)
+		require.NoError(t, err, "Failed to create filter source file")
+		defer os.Remove(filterSourceFile)
+
+		// Find cursor position after "[[id:Target"
+		filterLine, filterChar := findCursorPosition(filterSourceContent, "[[id:Target")
+
+		// Open filter document
+		filterDidOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absFilterSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       filterSourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", filterDidOpenParams); err != nil {
+			t.Fatalf("Failed to open filter source file: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		filterCompletionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absFilterSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      filterLine,
+					Character: filterChar,
+				},
+			},
+		}
+
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", filterCompletionParams, &completionResult)
+		require.NoError(t, err, "Filter completion request failed")
+		require.NotNil(t, completionResult, "Expected filter completion result")
+
+		// Verify filtering works - should find Target Heading
+		foundFilteredItem := false
+		for _, item := range completionResult.Items {
+			if item.Label == "Target Heading" {
+				foundFilteredItem = true
+				break
+			}
+		}
+		// Note: This test may need adjustment based on actual workspace content
+		t.Logf("Filter test found %d items", len(completionResult.Items))
+		if len(completionResult.Items) > 0 {
+			t.Logf("First item: Label=%s", completionResult.Items[0].Label)
+		}
+		require.True(t, foundFilteredItem, "Expected to find 'Target Heading' when filtering by 'Target'")
+
+		// Test NO completion without [[id: prefix
+		t.Log("Testing no completion without [[id: prefix...")
+		noPrefixSourceFile := "testdata/completion-noprefix-source.org"
+		absNoPrefixSourceFile, _ := filepath.Abs(noPrefixSourceFile)
+		noPrefixSourceContent := "* No Prefix Test\nSome text with id:" // Has id: but not [[id:
+
+		err = os.WriteFile(noPrefixSourceFile, []byte(noPrefixSourceContent), 0644)
+		require.NoError(t, err, "Failed to create no-prefix source file")
+		defer os.Remove(noPrefixSourceFile)
+
+		// Find cursor position at end of "id:"
+		noPrefixLine, noPrefixChar := findCursorPosition(noPrefixSourceContent, "id:")
+
+		// Open no-prefix document
+		noPrefixDidOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absNoPrefixSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       noPrefixSourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", noPrefixDidOpenParams); err != nil {
+			t.Fatalf("Failed to open no-prefix source file: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		noPrefixCompletionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absNoPrefixSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      noPrefixLine,
+					Character: noPrefixChar,
+				},
+			},
+		}
+
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", noPrefixCompletionParams, &completionResult)
+		require.NoError(t, err, "No-prefix completion request failed")
+		// Without [[id: prefix, should get nil or empty result
+		if completionResult != nil {
+			// Check if we got any ID link items - we shouldn't have any
+			for _, item := range completionResult.Items {
+				if item.Kind != nil && *item.Kind == protocol.CompletionItemKindReference {
+					t.Error("Expected no ID completion items without [[id: prefix")
+					break
+				}
+			}
+		}
+
+		// Test NO completion with just [[ prefix (no id:)
+		t.Log("Testing no completion with just [[ prefix...")
+		justBracketSourceFile := "testdata/completion-just-bracket-source.org"
+		absJustBracketSourceFile, _ := filepath.Abs(justBracketSourceFile)
+		justBracketSourceContent := "* Just Bracket Test\nSome text with [[" // Has [[ but not [[id:
+
+		err = os.WriteFile(justBracketSourceFile, []byte(justBracketSourceContent), 0644)
+		require.NoError(t, err, "Failed to create just-bracket source file")
+		defer os.Remove(justBracketSourceFile)
+
+		// Find cursor position at end of "[["
+		justBracketLine, justBracketChar := findCursorPosition(justBracketSourceContent, "[[")
+
+		// Open just-bracket document
+		justBracketDidOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absJustBracketSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       justBracketSourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", justBracketDidOpenParams); err != nil {
+			t.Fatalf("Failed to open just-bracket source file: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		justBracketCompletionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absJustBracketSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      justBracketLine,
+					Character: justBracketChar,
+				},
+			},
+		}
+
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", justBracketCompletionParams, &completionResult)
+		require.NoError(t, err, "Just-bracket completion request failed")
+		// With [[ but no id:, should get nil or empty result
+		if completionResult != nil {
+			// Check if we got any ID link items - we shouldn't have any
+			for _, item := range completionResult.Items {
+				if item.Kind != nil && *item.Kind == protocol.CompletionItemKindReference {
+					t.Error("Expected no ID completion items with just [[ prefix (need [[id:)")
+					break
+				}
+			}
+		}
 	})
 
 	// Test 4: Shutdown

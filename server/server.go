@@ -34,8 +34,17 @@ type State struct {
 	ProcessedFiles *orgscanner.ProcessedFiles
 	// OpenDocs tracks currently open documents by URI
 	OpenDocs map[protocol.DocumentUri]*org.Document
+	// RawContent stores the raw text of open documents for context extraction
+	RawContent map[protocol.DocumentUri]string
 	// DocVersions tracks document version numbers by URI
 	DocVersions map[protocol.DocumentUri]int32
+}
+
+// CompletionContext holds detailed context for code completion
+type CompletionContext struct {
+	Type                string // "id", "tag", or ""
+	FilterPrefix        string // Text typed after the prefix for filtering
+	NeedsClosingBracket bool   // True if trigger was "[[" and needs "]]" inserted
 }
 
 // Generic helper to find a node of type T at a given cursor position
@@ -163,6 +172,7 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 	serverState = &State{}
 	serverState.OpenDocs = make(map[protocol.DocumentUri]*org.Document)
 	serverState.DocVersions = make(map[protocol.DocumentUri]int32)
+	serverState.RawContent = make(map[protocol.DocumentUri]string)
 
 	if params.RootURI != nil && *params.RootURI != "" {
 		// Convert URI to filesystem path (strip file:// prefix)
@@ -241,10 +251,12 @@ func textDocumentDidOpen(context *glsp.Context, params *protocol.DidOpenTextDocu
 	slog.Info("Opening document", "uri", uri, "version", params.TextDocument.Version)
 
 	// Parse the document content
-	doc := org.New().Parse(strings.NewReader(params.TextDocument.Text), string(uri))
+	text := params.TextDocument.Text
+	doc := org.New().Parse(strings.NewReader(text), string(uri))
 
 	serverState.OpenDocs[uri] = doc
 	serverState.DocVersions[uri] = params.TextDocument.Version
+	serverState.RawContent[uri] = text
 	return nil
 }
 
@@ -269,8 +281,7 @@ func textDocumentDidChange(context *glsp.Context, params *protocol.DidChangeText
 
 			serverState.OpenDocs[uri] = doc
 			serverState.DocVersions[uri] = params.TextDocument.Version
-		} else {
-			slog.Error("Failed to cast content change event", "uri", uri)
+			serverState.RawContent[uri] = text
 		}
 	}
 
@@ -288,6 +299,7 @@ func textDocumentDidClose(context *glsp.Context, params *protocol.DidCloseTextDo
 
 	delete(serverState.OpenDocs, uri)
 	delete(serverState.DocVersions, uri)
+	delete(serverState.RawContent, uri)
 	return nil
 }
 
@@ -547,41 +559,44 @@ func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*pr
 
 // extractContextLines extracts ±3 lines of context around the target position
 func extractContextLines(filePath string, targetPos org.Position) string {
-	// Debug logging
 	slog.Debug("Extracting context lines", "filePath", filePath, "targetPos", targetPos)
 
-	// Read file content
-	content, err := os.ReadFile(filePath)
+	lines, err := readFileLines(filePath)
 	if err != nil {
 		slog.Debug("Failed to read file for context extraction", "filePath", filePath, "error", err)
 		return ""
 	}
 
-	lines := strings.Split(string(content), "\n")
-	if len(lines) == 0 {
-		slog.Debug("File has no lines", "filePath", filePath)
-		return ""
-	}
-
-	// Debug: log file size and line count
-	slog.Debug("File read successfully", "filePath", filePath, "lineCount", len(lines))
-
 	// Calculate line range (±3 lines, 1-based to 0-based)
-	startLine := max(0, targetPos.StartLine-4)        // -3 lines  convert to 0-based
+	startLine := max(0, targetPos.StartLine-4)        // -3 lines, convert to 0-based
 	endLine := min(len(lines), targetPos.StartLine+2) // 3 lines, inclusive
 
-	// Extract and join context lines
+	return joinLines(lines, startLine, endLine)
+}
+
+// readFileLines reads a file and returns its lines
+func readFileLines(filePath string) ([]string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(content), "\n")
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("file has no lines")
+	}
+	return lines, nil
+}
+
+// joinLines joins lines from start to end index
+func joinLines(lines []string, start, end int) string {
 	var context strings.Builder
-	for i := startLine; i < endLine; i++ {
-		if i > startLine {
+	for i := start; i < end && i < len(lines); i++ {
+		if i > start {
 			context.WriteString("\n")
 		}
 		context.WriteString(lines[i])
 	}
-
-	result := context.String()
-	slog.Debug("Context extraction complete", "filePath", filePath, "contextLength", len(result), "lines", endLine-startLine)
-	return result
+	return context.String()
 }
 
 func textDocumentReferences(context *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
@@ -676,15 +691,19 @@ func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionPa
 	}
 
 	// Check completion context - are we in "id:" or ":tag:" completion?
-	compContext := detectCompletionContext(doc, params.Position)
+	ctx := detectCompletionContext(doc, uri, params.Position)
+
+	if ctx.Type == "" {
+		return nil, nil
+	}
 
 	var items []protocol.CompletionItem
 
-	switch compContext {
+	switch ctx.Type {
 	case "id":
-		items = completeIDs()
+		items = completeIDs(ctx)
 	case "tag":
-		items = completeTags(doc, params.Position)
+		items = completeTags(doc, params.Position, ctx)
 	default:
 		return nil, nil
 	}
@@ -695,24 +714,88 @@ func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionPa
 	}, nil
 }
 
-func detectCompletionContext(doc *org.Document, pos protocol.Position) string {
-	// Check for tag context: must be on the headline line itself (where tags are)
+func detectCompletionContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
+	// First check if we're in a tag context (on headline line)
 	headline, found := findNodeAtPosition[org.Headline](doc, pos)
 	if found {
 		// Cursor must be on the headline's first line (where the * is)
-		// Headlines span from their title line to the end of their content,
-		// so we need to check specifically if we're on line 1 of the headline
 		if headline.Pos.StartLine == int(pos.Line)+1 { // +1 because org is 1-based, LSP is 0-based
-			return "tag"
+			// Now check if we're AFTER the headline title text (not at beginning)
+			return detectTagContext(doc, pos, headline)
 		}
 	}
 
-	// Otherwise assume ID completion context
-	// (The trigger character ":" was typed, and we're not on a headline line)
-	return "id"
+	// Check if we're in an ID link completion context by examining text before cursor
+	return detectIDContext(doc, uri, pos)
 }
 
-func completeIDs() []protocol.CompletionItem {
+// detectIDContext checks if cursor is in an ID completion context (after "id:" or "[[")
+func detectIDContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
+	ctx := CompletionContext{Type: ""}
+
+	// Get raw content to check text before cursor
+	content, found := serverState.RawContent[uri]
+	if !found {
+		return ctx
+	}
+
+	lines := strings.Split(content, "\n")
+	if int(pos.Line) >= len(lines) {
+		return ctx
+	}
+
+	line := lines[pos.Line]
+	if int(pos.Character) > len(line) {
+		return ctx
+	}
+
+	textBeforeCursor := line[:pos.Character]
+
+	// Only complete on "[[id:" prefix
+	idx := strings.LastIndex(textBeforeCursor, "[[id:")
+	if idx == -1 {
+		return ctx // No [[id: prefix found
+	}
+
+	ctx.Type = "id"
+	ctx.FilterPrefix = strings.ToLower(strings.TrimSpace(textBeforeCursor[idx+5:]))
+
+	// Check if closing brackets already exist after cursor
+	if int(pos.Character) < len(line) {
+		textAfterCursor := line[pos.Character:]
+		// Only add closing brackets if they don't already exist
+		ctx.NeedsClosingBracket = !strings.HasPrefix(textAfterCursor, "]]")
+	} else {
+		ctx.NeedsClosingBracket = true
+	}
+
+	return ctx
+}
+
+// detectTagContext checks if cursor is in a valid tag position (after headline text)
+func detectTagContext(doc *org.Document, pos protocol.Position, headline *org.Headline) CompletionContext {
+	// Tags appear at the end of the headline line, after the title
+	// Check if position is after the headline title ends
+	// In org, Headline.Pos.EndLine is calculated based on content
+	// For tag completion, we need cursor to be on the headline line itself (checked above)
+	// AND after some text (not right after asterisk)
+
+	cursorCol := int(pos.Character)
+
+	// If cursor is at or before the asterisk + space, not in tag context
+	// Headline lines look like: "* Title          :tag:"
+	if cursorCol < 2 { // Too early on line
+		return CompletionContext{Type: ""}
+	}
+
+	return CompletionContext{
+		Type:                "tag",
+		FilterPrefix:        "",
+		NeedsClosingBracket: false,
+	}
+}
+
+func completeIDs(ctx CompletionContext) []protocol.CompletionItem {
 	if serverState.ProcessedFiles == nil {
 		return nil
 	}
@@ -724,22 +807,40 @@ func completeIDs() []protocol.CompletionItem {
 		uuid := string(key.(orgscanner.UUID))
 		location := value.(orgscanner.HeaderLocation)
 
-		// Find the FileInfo for this location to get the title
-		var title string
-		for _, fileInfo := range serverState.ProcessedFiles.Files {
-			if fileInfo.Path == location.FilePath {
-				title = fileInfo.Title
-				break
+		// Use the header title from the location (now available in UUID index)
+		title := location.Title
+		if title == "" {
+			title = "Untitled"
+		}
+
+		// Filter by title if user has typed something after the prefix
+		if ctx.FilterPrefix != "" {
+			titleLower := strings.ToLower(title)
+			if !strings.Contains(titleLower, ctx.FilterPrefix) {
+				return true // Skip this item, continue iteration
 			}
 		}
 
-		// Create completion item
+		// Generate hover preview for this header as documentation
+		preview := extractContextLinesForCompletion(location)
+
+		// Build insert text: UUID + closing brackets if needed
+		insertText := uuid
+		if ctx.NeedsClosingBracket {
+			insertText = uuid + "]]"
+		}
+
+		// Create completion item with title as label, UUID as insert text
 		kind := protocol.CompletionItemKindReference
 		item := protocol.CompletionItem{
-			Label:      uuid[:8] + "...", // Show first 8 chars for brevity
+			Label:      title, // User sees heading title
 			Kind:       &kind,
-			Detail:     &title,
-			InsertText: &uuid,
+			Detail:     strPtr("ID Link"), // Type indicator
+			InsertText: &insertText,       // Full UUID inserted (+ closing brackets)
+			Documentation: protocol.MarkupContent{
+				Kind:  protocol.MarkupKindMarkdown,
+				Value: preview,
+			},
 		}
 
 		items = append(items, item)
@@ -749,7 +850,31 @@ func completeIDs() []protocol.CompletionItem {
 	return items
 }
 
-func completeTags(doc *org.Document, pos protocol.Position) []protocol.CompletionItem {
+// extractContextLinesForCompletion generates hover preview for completion items
+// Shows header and content below it (not arbitrary context above)
+func extractContextLinesForCompletion(loc orgscanner.HeaderLocation) string {
+	absPath := filepath.Join(serverState.OrgScanRoot, loc.FilePath)
+	absPath = filepath.Clean(absPath)
+
+	lines, err := readFileLines(absPath)
+	if err != nil {
+		return ""
+	}
+
+	// Show header line and content below it
+	startLine := loc.Position.StartLine - 1              // Convert to 0-based
+	endLine := min(len(lines), loc.Position.StartLine+2) // Header + 2 lines below
+
+	var context strings.Builder
+	context.WriteString("**")
+	context.WriteString(loc.Title)
+	context.WriteString("**\n\n```org\n")
+	context.WriteString(joinLines(lines, startLine, endLine))
+	context.WriteString("\n```")
+	return context.String()
+}
+
+func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContext) []protocol.CompletionItem {
 	if serverState.ProcessedFiles == nil {
 		return nil
 	}

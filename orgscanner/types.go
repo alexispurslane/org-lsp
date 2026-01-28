@@ -10,10 +10,11 @@ import (
 	"github.com/alexispurslane/go-org/org"
 )
 
-// HeaderLocation represents the position of a header containing a specific UUID.
+// HeaderLocation represents the position and title of a header containing a specific UUID.
 type HeaderLocation struct {
 	FilePath string
 	Position org.Position
+	Title    string
 }
 
 // UUID represents a globally unique org mode header identifier.
@@ -23,8 +24,14 @@ type UUID string
 // Deprecated: Use org.Position for precise line/column information.
 type HeaderIndex int
 
-// FileUUIDPositions maps UUID strings to their positions within a file.
-type FileUUIDPositions map[UUID]org.Position
+// UUIDInfo holds both position and title for a UUID entry.
+type UUIDInfo struct {
+	Position org.Position
+	Title    string
+}
+
+// FileUUIDPositions maps UUID strings to their info (position + title) within a file.
+type FileUUIDPositions map[UUID]UUIDInfo
 
 // FileInfo contains extracted metadata and content from a parsed org-mode file.
 type FileInfo struct {

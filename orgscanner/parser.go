@@ -118,7 +118,10 @@ func extractUUIDs(doc *org.Document) FileUUIDPositions {
 					if prop[0] == "ID" && prop[1] != "" {
 						id := UUID(prop[1])
 						if isValidUUID(string(id)) {
-							uuidToPosition[id] = normalizePosition(headline.Pos)
+							uuidToPosition[id] = UUIDInfo{
+								Position: normalizePosition(headline.Pos),
+								Title:    strings.TrimSpace(org.String(headline.Title...)),
+							}
 						}
 					}
 				}

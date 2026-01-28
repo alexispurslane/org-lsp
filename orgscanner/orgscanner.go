@@ -57,10 +57,11 @@ func Process(root string) (*ProcessedFiles, error) {
 			}
 
 			// Populate UUID map
-			for uuid, position := range parsed.UUIDs {
+			for uuid, info := range parsed.UUIDs {
 				procFiles.UuidIndex.Store(uuid, HeaderLocation{
 					FilePath: parsed.Path,
-					Position: position,
+					Position: info.Position,
+					Title:    info.Title,
 				})
 			}
 
