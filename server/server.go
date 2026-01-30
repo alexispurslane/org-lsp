@@ -310,15 +310,21 @@ func textDocumentDidChange(context *glsp.Context, params *protocol.DidChangeText
 	// Re-parse the entire document with the new content
 	if len(params.ContentChanges) > 0 {
 		change := params.ContentChanges[0]
+		slog.Debug("Change received", "type", fmt.Sprintf("%T", change), "change", change)
 		// Type assert to access Text field
-		if changeEvent, ok := change.(protocol.TextDocumentContentChangeEvent); ok {
+		if changeEvent, ok := change.(protocol.TextDocumentContentChangeEventWhole); ok {
+			slog.Debug("Type assertion succeeded for TextDocumentContentChangeEventWhole")
 			text := changeEvent.Text
+			slog.Debug("Document change received", "uri", uri, "textLen", len(text), "first100", text[:min(100, len(text))])
 
 			doc := org.New().Parse(strings.NewReader(text), string(uri))
 
 			serverState.OpenDocs[uri] = doc
 			serverState.DocVersions[uri] = params.TextDocument.Version
 			serverState.RawContent[uri] = text
+			slog.Debug("RawContent updated", "uri", uri, "contentLen", len(text))
+		} else {
+			slog.Error("Type assertion failed for TextDocumentContentChangeEventWhole", "actualType", fmt.Sprintf("%T", change))
 		}
 	}
 
@@ -457,6 +463,15 @@ func getChildren(node org.Node) []org.Node {
 	default:
 		return nil
 	}
+}
+
+// getMapKeys returns a slice of keys from a map for debugging
+func getMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // resolveFileLink resolves a file: link to an absolute path and returns the target position
@@ -789,12 +804,15 @@ func detectCompletionContext(doc *org.Document, uri protocol.DocumentUri, pos pr
 // detectIDContext checks if cursor is in an ID completion context (after "id:" or "[[")
 func detectIDContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
 	ctx := CompletionContext{Type: ""}
+	slog.Debug("detectIDContext called", "uri", uri, "line", pos.Line, "char", pos.Character)
 
 	// Get raw content to check text before cursor
 	content, found := serverState.RawContent[uri]
 	if !found {
+		slog.Debug("RawContent not found for URI", "uri", uri)
 		return ctx
 	}
+	slog.Debug("RawContent found", "contentLen", len(content))
 
 	lines := strings.Split(content, "\n")
 	if int(pos.Line) >= len(lines) {
@@ -807,12 +825,15 @@ func detectIDContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.P
 	}
 
 	textBeforeCursor := line[:pos.Character]
+	slog.Debug("Checking for [[id: prefix", "textBeforeCursor", textBeforeCursor, "lineLen", len(line), "cursorPos", pos.Character)
 
 	// Only complete on "[[id:" prefix
 	idx := strings.LastIndex(textBeforeCursor, "[[id:")
 	if idx == -1 {
+		slog.Debug("No [[id: prefix found in text before cursor")
 		return ctx // No [[id: prefix found
 	}
+	slog.Debug("Found [[id: prefix", "idx", idx, "filterText", textBeforeCursor[idx+5:])
 
 	ctx.Type = "id"
 	ctx.FilterPrefix = strings.ToLower(strings.TrimSpace(textBeforeCursor[idx+5:]))
@@ -908,7 +929,9 @@ func completeIDs(ctx CompletionContext) []protocol.CompletionItem {
 }
 
 // extractContextLinesForCompletion generates hover preview for completion items
-// Shows header and content below it (not arbitrary context above)
+// Excludes header and properties list, since the former is already included in
+// the completion item's name, and the latter is useless, so starts 4 lines
+// *after*
 func extractContextLinesForCompletion(loc orgscanner.HeaderLocation) string {
 	absPath := filepath.Join(serverState.OrgScanRoot, loc.FilePath)
 	absPath = filepath.Clean(absPath)
@@ -918,15 +941,37 @@ func extractContextLinesForCompletion(loc orgscanner.HeaderLocation) string {
 		return ""
 	}
 
-	// Show header line and content below it
-	startLine := loc.Position.StartLine                  // Convert to 0-based
-	endLine := min(len(lines), loc.Position.StartLine+2) // Header + 2 lines below
-
 	var context strings.Builder
 	context.WriteString("**")
 	context.WriteString(loc.Title)
 	context.WriteString("**\n\n```org\n")
-	context.WriteString(joinLines(lines, startLine, endLine))
+
+	// Show header line and content below it
+	startLine := loc.Position.StartLine + 1 // Exclude title
+	numLines := 4
+	readLines := 0
+	inProperties := false
+
+	for _, line := range lines[startLine:] {
+		if readLines >= numLines {
+			break
+		}
+
+		if strings.Contains(line, ":PROPERTIES:") {
+			inProperties = true
+		} else if strings.Contains(line, ":END:") {
+			inProperties = false
+			continue
+		}
+
+		if inProperties {
+			continue
+		}
+
+		context.WriteString(line)
+		readLines += 1
+	}
+
 	context.WriteString("\n```")
 	return context.String()
 }
