@@ -66,7 +66,7 @@ type DocumentUri string
 
 | OrgScanner Type | LSP Type | Purpose |
 |-----------------|----------|---------|
-| `org.Position` | `Position` | Convert 0-based to 1-based line numbers |
+| `org.Position` | `Position` | Direct mapping (both use 0-based coordinates) |
 | `HeaderLocation` | `Location` | Full URI + range for definitions |
 | `UUID` | string | Used for ID-link resolution and backlinks |
 | `FileInfo.Preview` | `Hover` | Content preview on link hover |
@@ -83,6 +83,24 @@ type ServerState struct {
     DocVersions map[string]int32             // Document version tracking
 }
 ```
+
+### Node Finding Architecture
+
+The `findNodeAtPosition` function uses depth-aware traversal to locate the most specific AST node at a given cursor position:
+
+Key characteristics:
+1. Essentially uses recursive tree structured spatial partitioning to find the node under the cursor
+2. Prefers deeper/more specific nodes over ancestors: if a node that might work
+   is found, we still recursively search it for anything on a deeper level that
+   might also work (helps for nested headings)
+3. Inline vs Block detection: the start and end columns of a block node are on
+   different lines, so it doesn't really make sense to apply them to collision
+   detection, since e.g. the start and end col could both be 0; but it does make
+   sense for links and such. So inline and block nodes have different collision
+   detection.
+
+This allows accurate link detection even within complex nested structures.
+
 
 ## LSP Capabilities
 
@@ -286,7 +304,7 @@ Trigger patterns:
 - [x] Add integration tests
 - [x] **Architecture**: Reuse existing `findNodeAtPosition` pattern and shared `toProtocolLocation` conversion
 
-### Phase 5: Completion (IDs & Tags) (In Progress)
+### Phase 5: Completion (IDs & Tags) ✅ (Complete)
 - [x] Advertise CompletionProvider capability
 - [x] Detect completion context (ID in any content, tags in headlines)
 - [x] Iterate UuidIndex for ID completion
@@ -308,10 +326,18 @@ Trigger patterns:
 - Reused hover preview generation (extracted to shared functions) for completion item details
 - Header context shows header line + content below (not arbitrary context above)
 
-### Phase 6: Polish & Testing
+### Phase 6: Polish & Testing ✅ (Complete)
 - [x] **CRITICAL FIX**: URL-decode file:// URIs to handle spaces (%20) in paths
 - [x] Integration testing with real editors (Emacs/Zed)
 - [x] Document sync for change/close handlers
+- [x] **Architecture**: Depth-aware node finding with inline vs block detection
+
+## Post-MVP Future Work
+- [ ] Error handling for missing files/UUIDs (structured error responses)
+- [ ] Performance optimization (lazy loading, caching)
+- [ ] Configurable workspace scanning (exclude patterns, custom roots)
+- [ ] Document formatting provider
+- [ ] Diagnostics for broken links
 
 ### Logging Strategy
 
@@ -328,7 +354,7 @@ Trigger patterns:
 |---------|---------|---------|
 | `github.com/tliron/glsp` | v0.2.2 | LSP protocol server |
 | `github.com/tliron/glsp/protocol_3_16` | v0.2.2 | LSP 3.16 types |
-| `github.com/niklasfasching/go-org` | v1.9.1 | Org-mode parsing |
+| `github.com/alexispurslane/go-org` | v1.9.1 | Org-mode parsing (fork with position support) |
 | `github.com/alexispurslane/org-lsp/orgscanner` | local | File scanning, UUID index |
 | `golang.org/x/net` | v0.38.0 | Transitive dependency |
 
@@ -343,5 +369,5 @@ The server runs on stdio by default for LSP client compatibility.
 ---
 
 **Version:** 0.0.1  
-**Last Updated:** 2024  
-**Status:** Draft - MVP Specification
+**Last Updated:** 2026-01-30
+**Status:** MVP Complete - Core Features Implemented
