@@ -3,11 +3,13 @@ module github.com/alexispurslane/org-lsp
 go 1.25.6
 
 require (
-	github.com/alexispurslane/go-org v1.11.1
+	github.com/alexispurslane/go-org v0.0.0-20260126031516-c815abd41e48
 	github.com/sourcegraph/jsonrpc2 v0.2.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tliron/glsp v0.2.2
 )
+
+replace github.com/alexispurslane/go-org => /Users/alexispurslane/Development/scratch/go-org
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

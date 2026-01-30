@@ -1,4 +1,5 @@
 # Set SHELL and use proper flags
+
 set shell := ["sh", "-cu"]
 
 # Default recipe
@@ -12,8 +13,12 @@ build:
     go build -o bin/org-lsp ./cmd/server
     @echo "✓ Built: bin/org-lsp"
 
+install: build
+    @echo "Installing org-lsp to ~/.local/bin..."
+    cp ./bin/org-lsp ~/.local/bin/org-lsp
+
 # Run the LSP server
-run build:
+run: build
     @echo "Starting org-lsp..."
     ./bin/org-lsp
 
@@ -25,12 +30,12 @@ server: build
 # Run the LSP server tests (optional filter argument)
 test filter="":
     @echo "Running LSP server integration tests..."
-    ORG_LSP_LOG_LEVEL=INFO go test -v -run="{{filter}}" ./...
+    ORG_LSP_LOG_LEVEL=INFO go test -v -run="{{ filter }}" ./...
 
 # Run tests quietly (no INFO logs, optional filter argument)
 test-quiet filter="":
     @echo "Running tests quietly..."
-    ORG_LSP_LOG_LEVEL=ERROR go test -v -run="{{filter}}" ./...
+    ORG_LSP_LOG_LEVEL=ERROR go test -v -run="{{ filter }}" ./...
 
 # Run all Go tests
 test-unit:

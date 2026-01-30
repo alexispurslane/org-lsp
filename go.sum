@@ -1,5 +1,3 @@
-github.com/alexispurslane/go-org v1.11.1 h1:Rfct7j5ZXZOSmKLgsdUcXCp3slToJXNMuxgIkR2ncS8=
-github.com/alexispurslane/go-org v1.11.1/go.mod h1:QkUEqK24klcM23aucM2HGIh3B/7j/7IhE9H+HNacb2c=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

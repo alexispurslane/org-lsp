@@ -3,12 +3,21 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"runtime/debug"
 
 	"github.com/alexispurslane/org-lsp/server"
 )
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("PANIC", "error", r, "stack", string(debug.Stack()))
+			os.Exit(1)
+		}
+	}()
+
 	var (
 		stdio bool
 		tcp   string
@@ -20,11 +29,13 @@ func main() {
 	srv := server.New()
 
 	if tcp != "" {
+		slog.Info("org-lsp server starting", "mode", "tcp", "address", tcp)
 		if err := srv.RunTCP(tcp); err != nil {
 			fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
+		slog.Info("org-lsp server starting", "mode", "stdio")
 		srv.RunStdio()
 	}
 }

@@ -309,6 +309,7 @@ Trigger patterns:
 - Header context shows header line + content below (not arbitrary context above)
 
 ### Phase 6: Polish & Testing
+- [x] **CRITICAL FIX**: URL-decode file:// URIs to handle spaces (%20) in paths
 - [ ] Error handling for missing files/UUIDs
 - [ ] Performance optimization (lazy loading?)
 - [ ] Configurable workspace scanning

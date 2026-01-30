@@ -1,5 +1,7 @@
 # Agent Development Guidelines for org-lsp
 
+**⚠️ CRITICAL FOR AGENTS**: Always use `just` for building and testing (`just build`, `just test`). Never run `go build`/`go test` directly - `just` ensures proper module resolution.
+
 This document serves as a knowledge base for AI agents and developers working on org-lsp. It captures architectural decisions, coding patterns, and common pitfalls to ensure consistent development.
 
 ## Project Overview
@@ -173,9 +175,15 @@ slog.Info(fmt.Sprintf("Starting scan: %s", root))
 ## Development Workflow
 
 ### 1. Making Changes
+
+**AGENTS MUST USE JUST**: Always use `just` commands for building and testing. Never run `go build` or `go test` directly, as `just` ensures proper module resolution and build flags.
+
 ```bash
 # Make changes
 zed server/server.go
+
+# Build (always via just)
+just build
 
 # Format code
 just fmt

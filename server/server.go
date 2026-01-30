@@ -4,6 +4,7 @@ package server
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -40,6 +41,20 @@ type State struct {
 	DocVersions map[protocol.DocumentUri]int32
 }
 
+// uriToPath converts a file:// URI to a filesystem path, URL-decoding any percent-encoded characters.
+func uriToPath(uri protocol.DocumentUri) string {
+	s := string(uri)
+	if len(s) > 7 && s[:7] == "file://" {
+		s = s[7:]
+	}
+	// URL-decode any percent-encoded characters (e.g., %20 -> space)
+	decoded, err := url.PathUnescape(s)
+	if err != nil {
+		return s // Return undecoded on error
+	}
+	return decoded
+}
+
 // CompletionContext holds detailed context for code completion
 type CompletionContext struct {
 	Type                string // "id", "tag", or ""
@@ -54,16 +69,15 @@ func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*
 		return &zero, false
 	}
 
-	targetLine := int(pos.Line) + 1     // Convert to 1-based for org.Position
-	targetCol := int(pos.Character) + 1 // Convert to 1-based for org.Position
+	targetLine := int(pos.Line)
+	targetCol := int(pos.Character)
+	slog.Debug("findNodeAtPosition searching", "targetLine", targetLine, "targetCol", targetCol)
 
 	var foundNode *T
+	var foundDepth int = -1
 
 	var walkNodes func(node org.Node, currentDepth int)
 	walkNodes = func(node org.Node, currentDepth int) {
-		if foundNode != nil {
-			return // Already found, stop searching
-		}
 
 		// Use reflection to access Pos field on any node type
 		nodeVal := reflect.ValueOf(node)
@@ -89,21 +103,40 @@ func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*
 		}
 
 		// Check if cursor is within this node's range
-		cursorInNode := targetLine >= nodePos.StartLine && targetLine <= nodePos.EndLine &&
-			targetCol >= nodePos.StartColumn && targetCol <= nodePos.EndColumn
+		nodeType := reflect.TypeOf(node).String()
+		slog.Debug("Checking node", "type", nodeType, "startLine", nodePos.StartLine, "startCol", nodePos.StartColumn, "endLine", nodePos.EndLine, "endCol", nodePos.EndColumn)
+
+		// Determine if this is an inline node (requires precise column match) or block node (line-only match)
+		var isInline bool
+		switch node.(type) {
+		case org.Text, org.LineBreak, org.ExplicitLineBreak, org.StatisticToken,
+			org.Timestamp, org.Emphasis, org.InlineBlock, org.LatexFragment,
+			org.FootnoteLink, org.RegularLink, org.Macro:
+			isInline = true
+		}
+
+		cursorInNode := targetLine >= nodePos.StartLine && targetLine <= nodePos.EndLine
+
+		if isInline {
+			cursorInNode = cursorInNode &&
+				targetCol >= nodePos.StartColumn && targetCol <= nodePos.EndColumn
+		}
 
 		if cursorInNode {
-			// Check if this node matches the target type
 			if typedNode, ok := node.(T); ok {
-				foundNode = &typedNode
-				return
-			}
-
-			// Not the target type, but cursor is here - walk children to go deeper
-			if children := getChildren(node); children != nil {
-				for _, child := range children {
-					walkNodes(child, currentDepth+1)
+				// Only take this node if it's deeper than our current best match
+				if currentDepth > foundDepth {
+					slog.Debug("Found deeper target type node", "type", nodeType, "depth", currentDepth, "prevDepth", foundDepth)
+					foundNode = &typedNode
+					foundDepth = currentDepth
 				}
+			}
+		}
+
+		// Always walk children to find more specific matches
+		if children := getChildren(node); children != nil {
+			for _, child := range children {
+				walkNodes(child, currentDepth+1)
 			}
 		}
 	}
@@ -111,9 +144,6 @@ func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*
 	// Walk all document nodes
 	for _, node := range doc.Nodes {
 		walkNodes(node, 0)
-		if foundNode != nil {
-			break
-		}
 	}
 
 	if foundNode != nil {
@@ -134,19 +164,21 @@ type LinkNode struct {
 // New creates and returns a new LSP server instance.
 func New() *server.Server {
 	handler := protocol.Handler{
-		Initialize:             initialize,
-		Initialized:            initialized,
-		Shutdown:               shutdown,
-		SetTrace:               setTrace,
-		TextDocumentDidOpen:    textDocumentDidOpen,
-		TextDocumentDidChange:  textDocumentDidChange,
-		TextDocumentDidClose:   textDocumentDidClose,
-		TextDocumentDidSave:    textDocumentDidSave,
-		TextDocumentDefinition: textDocumentDefinition,
-		TextDocumentHover:      textDocumentHover,
-		TextDocumentReferences: textDocumentReferences,
-		TextDocumentCompletion: textDocumentCompletion,
+		Initialize:                      initialize,
+		Initialized:                     initialized,
+		Shutdown:                        shutdown,
+		SetTrace:                        setTrace,
+		WorkspaceDidChangeConfiguration: workspaceDidChangeConfiguration,
+		TextDocumentDidOpen:             textDocumentDidOpen,
+		TextDocumentDidChange:           textDocumentDidChange,
+		TextDocumentDidClose:            textDocumentDidClose,
+		TextDocumentDidSave:             textDocumentDidSave,
+		TextDocumentDefinition:          textDocumentDefinition,
+		TextDocumentHover:               textDocumentHover,
+		TextDocumentReferences:          textDocumentReferences,
+		TextDocumentCompletion:          textDocumentCompletion,
 	}
+	slog.Debug("Handler created", "TextDocumentDefinition", handler.TextDocumentDefinition != nil, "TextDocumentHover", handler.TextDocumentHover != nil)
 	return server.NewServer(&handler, serverName, false)
 }
 
@@ -154,7 +186,7 @@ func New() *server.Server {
 func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, error) {
 	// Configure logging level from environment
 	logLevel := os.Getenv("ORG_LSP_LOG_LEVEL")
-	level := slog.LevelInfo // default
+	level := slog.LevelDebug // default
 	if logLevel != "" {
 		switch logLevel {
 		case "DEBUG":
@@ -175,13 +207,8 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 	serverState.RawContent = make(map[protocol.DocumentUri]string)
 
 	if params.RootURI != nil && *params.RootURI != "" {
-		// Convert URI to filesystem path (strip file:// prefix)
-		rootURI := string(*params.RootURI)
-		if len(rootURI) > 7 && rootURI[:7] == "file://" {
-			serverState.OrgScanRoot = rootURI[7:]
-		} else {
-			serverState.OrgScanRoot = rootURI
-		}
+		// Convert URI to filesystem path
+		serverState.OrgScanRoot = uriToPath(*params.RootURI)
 
 		// Process org files from root directory
 		slog.Info("Starting org file scan", "root", serverState.OrgScanRoot)
@@ -216,6 +243,7 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 		},
 	}
 
+	slog.Debug("Initialize response", "DefinitionProvider", capabilities.DefinitionProvider, "HoverProvider", capabilities.HoverProvider)
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
 		ServerInfo: &protocol.InitializeResultServerInfo{
@@ -241,14 +269,23 @@ func setTrace(context *glsp.Context, params *protocol.SetTraceParams) error {
 	return nil
 }
 
+// workspaceDidChangeConfiguration handles the workspace/didChangeConfiguration notification.
+// Silently ignored - we don't use configuration changes currently.
+func workspaceDidChangeConfiguration(context *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
+	slog.Debug("Received workspace/didChangeConfiguration (ignored)")
+	return nil
+}
+
 // textDocumentDidOpen handles the LSP textDocument/didOpen notification.
 func textDocumentDidOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
+	slog.Debug("textDocument/didOpen handler called")
 	if serverState == nil {
+		slog.Error("Server state is nil in didOpen")
 		return nil
 	}
 
 	uri := params.TextDocument.URI
-	slog.Info("Opening document", "uri", uri, "version", params.TextDocument.Version)
+	slog.Info("Opening document", "uri", uri, "version", params.TextDocument.Version, "textLength", len(params.TextDocument.Text))
 
 	// Parse the document content
 	text := params.TextDocument.Text
@@ -319,22 +356,32 @@ func textDocumentDidSave(context *glsp.Context, params *protocol.DidSaveTextDocu
 }
 
 func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("PANIC in textDocumentDefinition", "recover", r)
+		}
+	}()
+	slog.Debug("textDocument/definition called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
 	if serverState == nil {
+		slog.Error("Server state is nil in definition")
 		return nil, nil
 	}
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]
 	if !found {
-		slog.Debug("Document not in OpenDocs", "uri", uri)
+		slog.Debug("Document not in OpenDocs", "uri", uri, "availableDocs", len(serverState.OpenDocs))
 		return nil, nil
 	}
 
 	// Find link at cursor position using generic helper
 	linkNode, foundLink := findNodeAtPosition[org.RegularLink](doc, params.Position)
 	if !foundLink {
+		slog.Debug("No link node found at position", "line", params.Position.Line, "char", params.Position.Character)
 		return nil, nil
 	}
+
+	slog.Debug("Found link node", "protocol", linkNode.Protocol, "url", linkNode.URL)
 
 	var filePath string
 	var pos org.Position
@@ -342,17 +389,22 @@ func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionPa
 
 	switch linkNode.Protocol {
 	case "file":
+		slog.Debug("Resolving file link", "url", linkNode.URL)
 		filePath, pos, err = resolveFileLink(uri, linkNode.URL)
 	case "id":
+		slog.Debug("Resolving ID link", "uuid", linkNode.URL)
 		filePath, pos, err = resolveIDLink(uri, linkNode.URL)
 	default:
+		slog.Debug("Unknown link protocol", "protocol", linkNode.Protocol)
 		return nil, nil
 	}
 
 	if err != nil {
+		slog.Debug("Link resolution failed", "error", err)
 		return nil, nil
 	}
 
+	slog.Debug("Link resolved", "filePath", filePath, "line", pos.StartLine)
 	return toProtocolLocation(filePath, pos)
 }
 
@@ -374,10 +426,10 @@ func toProtocolLocation(filePath string, pos org.Position) (protocol.Location, e
 // toProtocolRange converts an org.Position to a protocol.Range
 func toProtocolRange(pos org.Position) protocol.Range {
 	// Convert from 1-based (org) to 0-based (LSP) coordinates
-	startLine := uint32(pos.StartLine - 1)
-	startCol := uint32(pos.StartColumn - 1)
-	endLine := uint32(pos.EndLine - 1)
-	endCol := uint32(pos.EndColumn - 1)
+	startLine := uint32(pos.StartLine)
+	startCol := uint32(pos.StartColumn)
+	endLine := uint32(pos.EndLine)
+	endCol := uint32(pos.EndColumn)
 
 	return protocol.Range{
 		Start: protocol.Position{Line: startLine, Character: startCol},
@@ -411,8 +463,8 @@ func getChildren(node org.Node) []org.Node {
 func resolveFileLink(currentURI protocol.DocumentUri, linkURL string) (string, org.Position, error) {
 	slog.Debug("Resolving file link", "currentURI", currentURI, "linkURL", linkURL)
 
-	// Convert URI to path and remove file:// prefix
-	currentPath := string(currentURI)[7:]
+	// Convert URI to filesystem path
+	currentPath := uriToPath(currentURI)
 
 	// Remove the org-mode file: prefix
 	linkURL = strings.TrimPrefix(linkURL, "file:")
@@ -442,10 +494,10 @@ func resolveFileLink(currentURI protocol.DocumentUri, linkURL string) (string, o
 
 	// For file links, return position at start of file
 	pos := org.Position{
-		StartLine:   1,
-		StartColumn: 1,
-		EndLine:     1,
-		EndColumn:   1,
+		StartLine:   0,
+		StartColumn: 0,
+		EndLine:     0,
+		EndColumn:   0,
 	}
 
 	return linkURL, pos, nil
@@ -498,13 +550,16 @@ func countUUIDs(procFiles *orgscanner.ProcessedFiles) int {
 
 // textDocumentHover handles the LSP textDocument/hover request
 func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	slog.Debug("textDocument/hover handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
 	if serverState == nil {
+		slog.Error("Server state is nil in hover")
 		return nil, nil
 	}
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]
 	if !found {
+		slog.Debug("Document not found in OpenDocs for hover", "uri", uri, "availableDocs", len(serverState.OpenDocs))
 		return nil, nil
 	}
 
@@ -568,7 +623,7 @@ func extractContextLines(filePath string, targetPos org.Position) string {
 	}
 
 	// Calculate line range (±3 lines, 1-based to 0-based)
-	startLine := max(0, targetPos.StartLine-4)        // -3 lines, convert to 0-based
+	startLine := max(0, targetPos.StartLine)          // -3 lines, convert to 0-based
 	endLine := min(len(lines), targetPos.StartLine+2) // 3 lines, inclusive
 
 	return joinLines(lines, startLine, endLine)
@@ -679,7 +734,9 @@ func findIDReferences(targetUUID string) ([]protocol.Location, error) {
 }
 
 func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionParams) (any, error) {
+	slog.Debug("textDocument/completion handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
 	if serverState == nil {
+		slog.Error("Server state is nil in completion")
 		return nil, nil
 	}
 
@@ -719,7 +776,7 @@ func detectCompletionContext(doc *org.Document, uri protocol.DocumentUri, pos pr
 	headline, found := findNodeAtPosition[org.Headline](doc, pos)
 	if found {
 		// Cursor must be on the headline's first line (where the * is)
-		if headline.Pos.StartLine == int(pos.Line)+1 { // +1 because org is 1-based, LSP is 0-based
+		if headline.Pos.StartLine == int(pos.Line) {
 			// Now check if we're AFTER the headline title text (not at beginning)
 			return detectTagContext(doc, pos, headline)
 		}
@@ -862,7 +919,7 @@ func extractContextLinesForCompletion(loc orgscanner.HeaderLocation) string {
 	}
 
 	// Show header line and content below it
-	startLine := loc.Position.StartLine - 1              // Convert to 0-based
+	startLine := loc.Position.StartLine                  // Convert to 0-based
 	endLine := min(len(lines), loc.Position.StartLine+2) // Header + 2 lines below
 
 	var context strings.Builder
