@@ -44,9 +44,42 @@ type FileInfo struct {
 	ParsedOrg *org.Document
 }
 
+// Equal compares two FileInfo values based on Path.
+// This allows semantic equality checks even though FileInfo contains non-comparable fields.
+func (f FileInfo) Equal(other FileInfo) bool {
+	return f.Path == other.Path
+}
+
 // ProcessedFiles holds the results of scanning and parsing org files.
 type ProcessedFiles struct {
 	Files     []FileInfo
 	UuidIndex sync.Map // map[UUID]HeaderLocation
 	TagMap    sync.Map // map[string][]FileInfo
+}
+
+// FileAction indicates what action should be taken for a file during scanning.
+type FileAction int
+
+const (
+	// ShouldSkip indicates the file is unchanged and should not be processed.
+	ShouldSkip FileAction = iota
+	// ShouldParse indicates the file is new or modified and should be parsed.
+	ShouldParse
+	// ShouldDelete indicates the file no longer exists and should be removed from the index.
+	ShouldDelete
+)
+
+// FileMessage represents a file operation to be performed during scanning.
+type FileMessage struct {
+	Action FileAction
+	Info   FileInfo
+}
+
+// OrgScanner provides incremental scanning capabilities for org-mode files.
+// It maintains state between scans to avoid re-parsing unchanged files.
+type OrgScanner struct {
+	Root           string
+	ProcessedFiles *ProcessedFiles
+	LastScanTime   time.Time
+	mu             sync.RWMutex
 }

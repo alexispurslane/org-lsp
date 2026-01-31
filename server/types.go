@@ -35,9 +35,9 @@ type CompletionContext struct {
 
 // State holds the global server state
 type State struct {
-	OrgScanRoot    string
-	ProcessedFiles *orgscanner.ProcessedFiles
-	OpenDocs       map[protocol.DocumentUri]*org.Document
-	RawContent     map[protocol.DocumentUri]string
-	DocVersions    map[protocol.DocumentUri]int32
+	OrgScanRoot string
+	Scanner     *orgscanner.OrgScanner
+	OpenDocs    map[protocol.DocumentUri]*org.Document
+	RawContent  map[protocol.DocumentUri]string
+	DocVersions map[protocol.DocumentUri]int32
 }

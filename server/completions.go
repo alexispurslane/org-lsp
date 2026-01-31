@@ -186,14 +186,14 @@ func detectTagContext(doc *org.Document, pos protocol.Position, headline *org.He
 }
 
 func completeIDs(ctx CompletionContext) []protocol.CompletionItem {
-	if serverState.ProcessedFiles == nil {
+	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
 		return nil
 	}
 
 	var items []protocol.CompletionItem
 
 	// Walk through all UUIDs in the index
-	serverState.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
+	serverState.Scanner.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
 		uuid := string(key.(orgscanner.UUID))
 		location := value.(orgscanner.HeaderLocation)
 
@@ -288,7 +288,7 @@ func extractContextLinesForCompletion(loc orgscanner.HeaderLocation) string {
 }
 
 func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContext) []protocol.CompletionItem {
-	if serverState.ProcessedFiles == nil {
+	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
 		return nil
 	}
 
@@ -296,7 +296,7 @@ func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContex
 	seenTags := make(map[string]bool)
 
 	// Collect all unique tags from TagMap
-	serverState.ProcessedFiles.TagMap.Range(func(key, value any) bool {
+	serverState.Scanner.ProcessedFiles.TagMap.Range(func(key, value any) bool {
 		tag := key.(string)
 
 		if !seenTags[tag] {
@@ -319,7 +319,7 @@ func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContex
 
 // Helper to get string pointer
 func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
-	if serverState.ProcessedFiles == nil {
+	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
 		return nil
 	}
 
@@ -327,7 +327,7 @@ func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
 	filterLower := strings.ToLower(ctx.FilterPrefix)
 
 	// Walk through all processed files
-	for _, fileInfo := range serverState.ProcessedFiles.Files {
+	for _, fileInfo := range serverState.Scanner.ProcessedFiles.Files {
 		// Filter by partial path prefix (case-insensitive)
 		filePathLower := strings.ToLower(fileInfo.Path)
 		if filterLower != "" && !strings.Contains(filePathLower, filterLower) {

@@ -112,14 +112,14 @@ func resolveFileLink(currentURI protocol.DocumentUri, linkURL string) (string, o
 
 // resolveIDLink resolves an id: link via UUID index and returns the target position
 func resolveIDLink(currentURI protocol.DocumentUri, uuid string) (string, org.Position, error) {
-	if serverState.ProcessedFiles == nil {
+	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
 		return "", org.Position{}, fmt.Errorf("no processed files")
 	}
 
 	uuid = uuid[3:] // remove "id:"
 
 	// Look up UUID in index
-	locInterface, found := serverState.ProcessedFiles.UuidIndex.Load(orgscanner.UUID(uuid))
+	locInterface, found := serverState.Scanner.ProcessedFiles.UuidIndex.Load(orgscanner.UUID(uuid))
 	if !found {
 		return "", org.Position{}, fmt.Errorf("UUID not found")
 	}
@@ -291,14 +291,14 @@ func textDocumentReferences(context *glsp.Context, params *protocol.ReferencePar
 }
 
 func findIDReferences(targetUUID string) ([]protocol.Location, error) {
-	if serverState.ProcessedFiles == nil {
+	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
 		return nil, nil
 	}
 
 	var locations []protocol.Location
 
 	// Walk through all processed files
-	for _, fileInfo := range serverState.ProcessedFiles.Files {
+	for _, fileInfo := range serverState.Scanner.ProcessedFiles.Files {
 		if fileInfo.ParsedOrg == nil {
 			continue
 		}

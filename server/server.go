@@ -91,12 +91,12 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 
 		// Process org files from root directory
 		slog.Info("Starting org file scan", "root", serverState.OrgScanRoot)
-		procFiles, err := orgscanner.Process(serverState.OrgScanRoot)
+		serverState.Scanner = orgscanner.NewOrgScanner(serverState.OrgScanRoot)
+		err := serverState.Scanner.Process()
 		if err != nil {
 			slog.Error("Failed to scan org files", "error", err)
 		} else {
-			slog.Info("Completed org file scan", "files_scanned", len(procFiles.Files), "uuids_indexed", countUUIDs(procFiles))
-			serverState.ProcessedFiles = procFiles
+			slog.Info("Completed org file scan", "files_scanned", len(serverState.Scanner.ProcessedFiles.Files), "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
 		}
 	}
 
@@ -235,14 +235,13 @@ func textDocumentDidClose(context *glsp.Context, params *protocol.DidCloseTextDo
 
 // textDocumentDidSave handles the LSP textDocument/didSave notification.
 func textDocumentDidSave(context *glsp.Context, params *protocol.DidSaveTextDocumentParams) error {
-	if serverState.OrgScanRoot != "" {
+	if serverState.Scanner != nil {
 		slog.Info("Re-scanning org files on save", "file", params.TextDocument.URI)
-		procFiles, err := orgscanner.Process(serverState.OrgScanRoot)
+		err := serverState.Scanner.Process()
 		if err != nil {
 			slog.Error("Failed to re-scan org files", "error", err)
 		} else {
-			slog.Info("Completed org file re-scan", "files_scanned", len(procFiles.Files), "uuids_indexed", countUUIDs(procFiles))
-			serverState.ProcessedFiles = procFiles
+			slog.Info("Completed org file re-scan", "files_scanned", len(serverState.Scanner.ProcessedFiles.Files), "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
 		}
 	}
 	return nil

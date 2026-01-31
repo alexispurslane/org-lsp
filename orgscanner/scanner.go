@@ -9,15 +9,76 @@ import (
 	"strings"
 )
 
-// Scan walks the directory tree from root and collects all .org files.
-// Returns a slice of FileInfo with relative paths and modification times.
-func Scan(root string) ([]FileInfo, error) {
+// Scan compares the filesystem against the current index and returns
+// a list of file messages indicating what action to take for each file.
+// It only returns files that need parsing or deletion - unchanged files are skipped.
+func (s *OrgScanner) Scan() ([]FileMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.scanUnlocked()
+}
+
+// scanUnlocked is the internal scan implementation that assumes lock is held.
+func (s *OrgScanner) scanUnlocked() ([]FileMessage, error) {
+	// Get current files on disk
+	diskFiles, err := scanFilesystem(s.Root)
+	if err != nil {
+		return nil, err
+	}
+
+	var messages []FileMessage
+
+	// Build a lookup set of on-disk files
+	currentFiles := make(map[string]FileInfo)
+	for _, f := range diskFiles {
+		currentFiles[f.Path] = f
+	}
+
+	// Build a lookup set for the files we've already processed
+	existingFiles := make(map[string]FileInfo)
+	for _, f := range s.ProcessedFiles.Files {
+		existingFiles[f.Path] = f
+	}
+
+	// Check for deleted files
+	for _, f := range s.ProcessedFiles.Files {
+		if _, exists := currentFiles[f.Path]; !exists {
+			messages = append(messages, FileMessage{
+				Action: ShouldDelete,
+				Info:   f,
+			})
+		}
+	}
+
+	// Check for new or modified files
+	for _, file := range diskFiles {
+		processedFile, ok := existingFiles[file.Path]
+		needsParse := !ok || processedFile.ModTime.Before(file.ModTime)
+
+		finalFile := file
+		if ok {
+			finalFile = processedFile
+		}
+
+		if needsParse {
+			messages = append(messages, FileMessage{
+				Action: ShouldParse,
+				Info:   finalFile,
+			})
+		}
+	}
+
+	return messages, nil
+}
+
+// scanFilesystem is the internal implementation that walks the directory tree.
+func scanFilesystem(root string) ([]FileInfo, error) {
 	slog.Debug("Scanning directory for .org files", "root", root)
 	var files []FileInfo
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			// Continue scanning on individual file errors
 			return nil
 		}
 
@@ -28,13 +89,11 @@ func Scan(root string) ([]FileInfo, error) {
 				return nil
 			}
 
-			// Get relative path from root
 			relPath := strings.TrimPrefix(path, root+string(filepath.Separator))
 			if relPath == path {
 				relPath = strings.TrimPrefix(path, root)
 			}
 
-			slog.Debug("Found .org file", "path", relPath, "mod_time", info.ModTime())
 			files = append(files, FileInfo{
 				Path:    relPath,
 				ModTime: info.ModTime(),

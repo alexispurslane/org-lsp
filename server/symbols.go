@@ -44,8 +44,8 @@ func workspaceSymbol(glspCtx *glsp.Context, params *protocol.WorkspaceSymbolPara
 	}
 	slog.Info("✅ serverState exists", "orgScanRoot", serverState.OrgScanRoot)
 
-	if serverState.ProcessedFiles == nil {
-		slog.Error("❌ serverState.ProcessedFiles is NIL")
+	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
+		slog.Error("❌ serverState.Scanner or ProcessedFiles is NIL")
 		return nil, nil
 	}
 
@@ -55,7 +55,7 @@ func workspaceSymbol(glspCtx *glsp.Context, params *protocol.WorkspaceSymbolPara
 	skipCount := 0
 
 	// Iterate through all UUID-indexed headers
-	serverState.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
+	serverState.Scanner.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
 		uuidKey, ok := key.(orgscanner.UUID)
 		if !ok {
 			slog.Warn("⚠️ UUID key is not an orgscanner.UUID", "key", key, "keyType", fmt.Sprintf("%T", key))
