@@ -106,41 +106,45 @@ func normalizePosition(pos org.Position) org.Position {
 	return pos
 }
 
-// extractUUIDs walks the AST to find all UUIDs in property drawers.
+// extractUUIDs walks the document outline to find all UUIDs in property drawers.
 func extractUUIDs(doc *org.Document) FileUUIDPositions {
 	uuidToPosition := make(FileUUIDPositions)
 
-	var walkNodes func(node org.Node)
-	walkNodes = func(node org.Node) {
-		if headline, ok := node.(org.Headline); ok {
-			if headline.Properties != nil {
-				for _, prop := range headline.Properties.Properties {
-					if prop[0] == "ID" && prop[1] != "" {
-						id := UUID(prop[1])
-						if isValidUUID(string(id)) {
-							uuidToPosition[id] = UUIDInfo{
-								Position: normalizePosition(headline.Pos),
-								Title:    strings.TrimSpace(org.String(headline.Title...)),
-							}
-						}
-					}
-				}
+	var walkSections func(sections []*org.Section)
+	walkSections = func(sections []*org.Section) {
+		for _, section := range sections {
+			if section.Headline != nil && section.Headline.Properties != nil {
+				headline := section.Headline
+				extractUUID(headline, uuidToPosition)
 			}
-
-			for _, child := range headline.Children {
-				walkNodes(child)
-			}
+			walkSections(section.Children)
 		}
 	}
 
-	for _, node := range doc.Nodes {
-		walkNodes(node)
-	}
+	walkSections(doc.Outline.Children)
 
 	if len(uuidToPosition) > 0 {
 		slog.Debug("Extracted UUIDs from property drawers", "uuid_count", len(uuidToPosition))
 	}
 	return uuidToPosition
+}
+
+// extractUUID takes a headline and finds all of the ID properties with valid
+// UUIDs in its property drawer and adds them to uuidToPosition
+//
+// IMPORTANT: modifies uuidToPosition!
+func extractUUID(headline *org.Headline, uuidToPosition FileUUIDPositions) {
+	for _, prop := range headline.Properties.Properties {
+		if prop[0] == "ID" && prop[1] != "" {
+			id := UUID(prop[1])
+			if isValidUUID(string(id)) {
+				uuidToPosition[id] = UUIDInfo{
+					Position: normalizePosition(headline.Pos),
+					Title:    strings.TrimSpace(org.String(headline.Title...)),
+				}
+			}
+		}
+	}
 }
 
 // extractPreview extracts a text preview from the document.
