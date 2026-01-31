@@ -52,9 +52,9 @@ func (f FileInfo) Equal(other FileInfo) bool {
 
 // ProcessedFiles holds the results of scanning and parsing org files.
 type ProcessedFiles struct {
-	Files     []FileInfo
-	UuidIndex sync.Map // map[UUID]HeaderLocation
-	TagMap    sync.Map // map[string][]FileInfo
+	Files     map[string]*FileInfo       // path -> file info
+	UuidIndex sync.Map                   // map[UUID]HeaderLocation
+	TagMap    map[string]map[string]bool // tag -> set of file paths
 }
 
 // FileAction indicates what action should be taken for a file during scanning.
@@ -72,7 +72,7 @@ const (
 // FileMessage represents a file operation to be performed during scanning.
 type FileMessage struct {
 	Action FileAction
-	Info   FileInfo
+	Info   *FileInfo
 }
 
 // OrgScanner provides incremental scanning capabilities for org-mode files.

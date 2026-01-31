@@ -296,9 +296,7 @@ func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContex
 	seenTags := make(map[string]bool)
 
 	// Collect all unique tags from TagMap
-	serverState.Scanner.ProcessedFiles.TagMap.Range(func(key, value any) bool {
-		tag := key.(string)
-
+	for tag := range serverState.Scanner.ProcessedFiles.TagMap {
 		if !seenTags[tag] {
 			seenTags[tag] = true
 
@@ -311,8 +309,7 @@ func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContex
 
 			items = append(items, item)
 		}
-		return true
-	})
+	}
 
 	return items
 }

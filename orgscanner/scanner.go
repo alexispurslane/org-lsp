@@ -30,13 +30,13 @@ func (s *OrgScanner) scanUnlocked() ([]FileMessage, error) {
 	var messages []FileMessage
 
 	// Build a lookup set of on-disk files
-	currentFiles := make(map[string]FileInfo)
+	currentFiles := make(map[string]*FileInfo)
 	for _, f := range diskFiles {
 		currentFiles[f.Path] = f
 	}
 
 	// Build a lookup set for the files we've already processed
-	existingFiles := make(map[string]FileInfo)
+	existingFiles := make(map[string]*FileInfo)
 	for _, f := range s.ProcessedFiles.Files {
 		existingFiles[f.Path] = f
 	}
@@ -73,9 +73,9 @@ func (s *OrgScanner) scanUnlocked() ([]FileMessage, error) {
 }
 
 // scanFilesystem is the internal implementation that walks the directory tree.
-func scanFilesystem(root string) ([]FileInfo, error) {
+func scanFilesystem(root string) ([]*FileInfo, error) {
 	slog.Debug("Scanning directory for .org files", "root", root)
-	var files []FileInfo
+	var files []*FileInfo
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -94,7 +94,7 @@ func scanFilesystem(root string) ([]FileInfo, error) {
 				relPath = strings.TrimPrefix(path, root)
 			}
 
-			files = append(files, FileInfo{
+			files = append(files, &FileInfo{
 				Path:    relPath,
 				ModTime: info.ModTime(),
 			})

@@ -4,7 +4,6 @@ package orgscanner
 
 import (
 	"log/slog"
-	"slices"
 	"sync"
 	"time"
 )
@@ -12,9 +11,9 @@ import (
 func NewOrgScanner(root string) *OrgScanner {
 	return &OrgScanner{
 		ProcessedFiles: &ProcessedFiles{
-			Files:     make([]FileInfo, 0),
+			Files:     make(map[string]*FileInfo),
 			UuidIndex: sync.Map{},
-			TagMap:    sync.Map{},
+			TagMap:    make(map[string]map[string]bool),
 		},
 		LastScanTime: time.Now(),
 		Root:         root,
@@ -37,23 +36,34 @@ func (s *OrgScanner) Process() error {
 	}
 
 	// Phase 1: Process all deletions
-	pathsToDelete := make(map[string]struct{})
 	for _, msg := range messages {
-		if msg.Action == ShouldDelete {
-			pathsToDelete[msg.Info.Path] = struct{}{}
-			// Cleanup UUIDs
-			for uuid := range msg.Info.UUIDs {
-				s.ProcessedFiles.UuidIndex.Delete(uuid)
+		if msg.Action != ShouldDelete {
+			continue
+		}
+		path := msg.Info.Path
+
+		// Cleanup UUIDs
+		for uuid := range msg.Info.UUIDs {
+			s.ProcessedFiles.UuidIndex.Delete(uuid)
+		}
+
+		// Cleanup TagMap - remove this file from all tag sets
+		for _, tag := range msg.Info.Tags {
+			if tagSet, ok := s.ProcessedFiles.TagMap[tag]; ok {
+				delete(tagSet, path)
+				// Clean up empty tag sets
+				if len(tagSet) == 0 {
+					delete(s.ProcessedFiles.TagMap, tag)
+				}
 			}
 		}
+
+		// Remove from Files map
+		delete(s.ProcessedFiles.Files, path)
+		slog.Debug("Removed file from index", "path", path)
 	}
 
-	s.ProcessedFiles.Files = slices.DeleteFunc(s.ProcessedFiles.Files, func(f FileInfo) bool {
-		_, found := pathsToDelete[f.Path]
-		return found
-	})
-
-	// Phase 3: Process all parses concurrently
+	// Phase 2: Process all parses concurrently
 	var wg sync.WaitGroup
 	var mu sync.Mutex // Protects Files and TagMap updates
 
@@ -72,7 +82,14 @@ func (s *OrgScanner) Process() error {
 				return
 			}
 
-			// (sync.Map is fine here as keys are unique per header)
+			// Remove old UUIDs for this file if it exists (re-parsing case)
+			if oldFile, exists := s.ProcessedFiles.Files[parsed.Path]; exists {
+				for uuid := range oldFile.UUIDs {
+					s.ProcessedFiles.UuidIndex.Delete(uuid)
+				}
+			}
+
+			// Put the new UUIDs in
 			for uuid, info := range parsed.UUIDs {
 				s.ProcessedFiles.UuidIndex.Store(uuid, HeaderLocation{
 					FilePath: parsed.Path,
@@ -81,43 +98,20 @@ func (s *OrgScanner) Process() error {
 				})
 			}
 
-			// Now we need to lock to update the tags and file list, which are not thread safe
+			// Now we need to lock to update the tags and file list
 			mu.Lock()
 			defer mu.Unlock()
 
-			// Update tag map
+			// Update tag map - add this file's path to each tag set
 			for _, tag := range parsed.Tags {
-				existing, _ := s.ProcessedFiles.TagMap.LoadOrStore(tag, []FileInfo{})
-
-				if existingSlice, ok := existing.([]FileInfo); ok {
-					// Check if file already in tag list
-					found := false
-
-					for i, fi := range existingSlice {
-						if fi.Path == parsed.Path {
-							existingSlice[i] = *parsed
-							found = true
-							break
-						}
-					}
-
-					if !found {
-						s.ProcessedFiles.TagMap.Store(tag, append(existingSlice, *parsed))
-					} else {
-						s.ProcessedFiles.TagMap.Store(tag, existingSlice)
-					}
+				if s.ProcessedFiles.TagMap[tag] == nil {
+					s.ProcessedFiles.TagMap[tag] = make(map[string]bool)
 				}
+				s.ProcessedFiles.TagMap[tag][parsed.Path] = true
 			}
 
-			// Update or Append to Files
-			idx := slices.IndexFunc(s.ProcessedFiles.Files, func(f FileInfo) bool {
-				return f.Path == parsed.Path
-			})
-			if idx >= 0 {
-				s.ProcessedFiles.Files[idx] = *parsed
-			} else {
-				s.ProcessedFiles.Files = append(s.ProcessedFiles.Files, *parsed)
-			}
+			// Store/Update in Files map (as pointer)
+			s.ProcessedFiles.Files[parsed.Path] = parsed
 		}(msg)
 	}
 	wg.Wait()
