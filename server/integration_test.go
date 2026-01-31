@@ -1349,9 +1349,9 @@ Another reference to [[id:33333333-3333-3333-3333-333333333333]].`
 			foundTypes[item.Label] = true
 		}
 
-		require.True(t, foundTypes["quote"], "Expected 'quote' block type")
-		require.True(t, foundTypes["src"], "Expected 'src' block type")
-		require.True(t, foundTypes["verse"], "Expected 'verse' block type")
+		require.True(t, foundTypes["#+begin_quote"], "Expected '#+begin_quote' block type")
+		require.True(t, foundTypes["#+begin_src"], "Expected '#+begin_src' block type")
+		require.True(t, foundTypes["#+begin_verse"], "Expected '#+begin_verse' block type")
 		t.Logf("✅ Block type completion successful! Found %d block types", len(blockItems))
 	})
 
@@ -1419,8 +1419,8 @@ Another reference to [[id:33333333-3333-3333-3333-333333333333]].`
 			foundTypes[item.Label] = true
 		}
 
-		require.True(t, foundTypes["html"], "Expected 'html' export type")
-		require.True(t, foundTypes["latex"], "Expected 'latex' export type")
+		require.True(t, foundTypes["#+begin_export_html"], "Expected '#+begin_export_html' export type")
+		require.True(t, foundTypes["#+begin_export_latex"], "Expected '#+begin_export_latex' export type")
 		t.Logf("✅ Export block completion successful! Found %d export types", len(exportItems))
 	})
 

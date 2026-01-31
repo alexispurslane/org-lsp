@@ -119,7 +119,10 @@ ServerCapabilities{
     ReferencesProvider:         true,   // Backlinks
     HoverProvider:              true,   // Link previews
     CompletionProvider: &CompletionOptions{
-            TriggerCharacters: []string{":"}, // Trigger on "id:" and ":tags:"
+            TriggerCharacters: []string{
+	            ":",  // Trigger on "id:" and ":tags:"
+	            "_", // Trigger on begin_ and export_
+            },
         },
 }
 ```
@@ -314,7 +317,7 @@ Trigger patterns:
 
 **Output:** `[]CompletionItem | CompletionList | nil`
 
-### 8. Block Type Completion
+### 8. Block Type Completion ✅
 
 **Goal:** Autocomplete block types after `#+begin_`
 
@@ -332,7 +335,7 @@ Trigger patterns:
 
 **Output:** `[]CompletionItem | CompletionList | nil`
 
-### 8b. Export Block Completion
+### 8b. Export Block Completion ✅
 
 **Goal:** Autocomplete export block types after `#+begin_export_`
 

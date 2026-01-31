@@ -29,10 +29,13 @@ func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionPa
 	ctx := detectCompletionContext(doc, uri, params.Position)
 
 	if ctx.Type == "" {
-		return nil, nil
+		return &protocol.CompletionList{
+			IsIncomplete: false,
+			Items:        []protocol.CompletionItem{},
+		}, nil
 	}
 
-	var items []protocol.CompletionItem
+	items := []protocol.CompletionItem{}
 
 	switch ctx.Type {
 	case ContextTypeID:
@@ -42,9 +45,9 @@ func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionPa
 	case ContextTypeFile:
 		items = completeFiles(ctx)
 	case ContextTypeBlock:
-		items = completeBlockTypes(ctx)
+		items = completeBlockTypes(ctx, params.Position)
 	case ContextTypeExport:
-		items = completeExportTypes(ctx)
+		items = completeExportTypes(ctx, params.Position)
 	default:
 		return nil, nil
 	}
@@ -353,11 +356,16 @@ func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
 }
 
 // completeBlockTypes returns completion items for block types (#+begin_)
-func completeBlockTypes(ctx CompletionContext) []protocol.CompletionItem {
+func completeBlockTypes(ctx CompletionContext, pos protocol.Position) []protocol.CompletionItem {
 	blockTypes := []string{"quote", "src", "verse"}
 
 	var items []protocol.CompletionItem
 	filterLower := strings.ToLower(ctx.FilterPrefix)
+
+	// Calculate the start of "#+begin_" prefix for TextEdit range
+	// "#+begin_" is 8 characters, plus whatever filter prefix was typed
+	prefixLen := 8 + len(ctx.FilterPrefix)
+	startChar := max(int(pos.Character)-prefixLen, 0)
 
 	for _, blockType := range blockTypes {
 		// Filter by partial match (case-insensitive)
@@ -365,15 +373,28 @@ func completeBlockTypes(ctx CompletionContext) []protocol.CompletionItem {
 			continue
 		}
 
+		fullLabel := "#+begin_" + blockType
 		item := protocol.CompletionItem{
-			Label:  blockType,
+			Label:  fullLabel,
 			Kind:   ptrTo(protocol.CompletionItemKindKeyword),
 			Detail: strPtr("Block type"),
 		}
 
-		// Insert text includes the type, newline, and end block
-		insertText := blockType + "\n\n#+end_" + blockType
-		item.InsertText = strPtr(insertText)
+		// Use TextEdit to replace the entire "#+begin_XXX" prefix
+		insertText := fullLabel + "\n\n#+end_" + blockType
+		item.TextEdit = &protocol.TextEdit{
+			Range: protocol.Range{
+				Start: protocol.Position{
+					Line:      pos.Line,
+					Character: protocol.UInteger(startChar),
+				},
+				End: protocol.Position{
+					Line:      pos.Line,
+					Character: pos.Character,
+				},
+			},
+			NewText: insertText,
+		}
 
 		items = append(items, item)
 	}
@@ -383,11 +404,16 @@ func completeBlockTypes(ctx CompletionContext) []protocol.CompletionItem {
 }
 
 // completeExportTypes returns completion items for export block types (#+begin_export_)
-func completeExportTypes(ctx CompletionContext) []protocol.CompletionItem {
+func completeExportTypes(ctx CompletionContext, pos protocol.Position) []protocol.CompletionItem {
 	exportTypes := []string{"html", "latex"}
 
 	var items []protocol.CompletionItem
 	filterLower := strings.ToLower(ctx.FilterPrefix)
+
+	// Calculate the start of "#+begin_export_" prefix for TextEdit range
+	// "#+begin_export_" is 15 characters, plus whatever filter prefix was typed
+	prefixLen := 15 + len(ctx.FilterPrefix)
+	startChar := max(int(pos.Character)-prefixLen, 0)
 
 	for _, exportType := range exportTypes {
 		// Filter by partial match (case-insensitive)
@@ -395,15 +421,28 @@ func completeExportTypes(ctx CompletionContext) []protocol.CompletionItem {
 			continue
 		}
 
+		fullLabel := "#+begin_export_" + exportType
 		item := protocol.CompletionItem{
-			Label:  exportType,
+			Label:  fullLabel,
 			Kind:   ptrTo(protocol.CompletionItemKindKeyword),
 			Detail: strPtr("Export format"),
 		}
 
-		// Insert text includes the type, newline, and end block
-		insertText := exportType + "\n\n#+end_export"
-		item.InsertText = strPtr(insertText)
+		// Use TextEdit to replace the entire "#+begin_export_XXX" prefix
+		insertText := fullLabel + "\n\n#+end_export"
+		item.TextEdit = &protocol.TextEdit{
+			Range: protocol.Range{
+				Start: protocol.Position{
+					Line:      pos.Line,
+					Character: protocol.UInteger(startChar),
+				},
+				End: protocol.Position{
+					Line:      pos.Line,
+					Character: pos.Character,
+				},
+			},
+			NewText: insertText,
+		}
 
 		items = append(items, item)
 	}

@@ -102,7 +102,7 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 		DefinitionProvider: truePtr,
 		ReferencesProvider: truePtr,
 		CompletionProvider: &protocol.CompletionOptions{
-			TriggerCharacters: []string{":"},
+			TriggerCharacters: []string{":", "_"},
 		},
 	}
 

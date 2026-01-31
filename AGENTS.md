@@ -153,6 +153,34 @@ require.True(t, ok, "Expected Contents to be MarkupContent, got %T", result.Cont
 content := result.Contents.(protocol.MarkupContent) // Will panic on failure
 ```
 
+### 4. Helix Client-Side Completion Filtering
+
+**CRITICAL**: Helix performs its own client-side filtering on completion items based on the `Label` field. The text before the cursor must be a prefix of the `Label`, otherwise Helix will silently filter out the completion.
+
+```go
+// ❌ WRONG - Label doesn't match what user typed
+// User typed: #+begin_s
+// Label is just "src"
+// Result: Helix filters it out because "src" doesn't match "#+begin_s"
+item := protocol.CompletionItem{
+    Label:  "src",
+    Kind:   ptrTo(protocol.CompletionItemKindKeyword),
+    Detail: strPtr("Block type"),
+}
+
+// ✅ CORRECT - Label includes full prefix
+// User typed: #+begin_s
+// Label is "#+begin_src"
+// Result: Helix shows it because "#+begin_src" starts with "#+begin_s"
+item := protocol.CompletionItem{
+    Label:  "#+begin_src",
+    Kind:   ptrTo(protocol.CompletionItemKindKeyword),
+    Detail: strPtr("Block type"),
+}
+```
+
+**Additionally**: Use `TextEdit` with a calculated range instead of `InsertText` to prevent duplication. When the user has typed `#+begin_s` and selects the completion, the server must replace the entire `#+begin_s` prefix, not just insert at the cursor position.
+
 ## Logging Conventions
 
 ### Log Levels
