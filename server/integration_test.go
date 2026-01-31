@@ -1084,7 +1084,347 @@ Different file with [[id:11111111-1111-1111-1111-111111111111][another reference
 		}
 	})
 
-	// Test 4: Shutdown
+	// Test 4: Enhanced References (cursor on ID link itself)
+	t.Run("EnhancedReferencesFromIDLink", func(t *testing.T) {
+		t.Log("Testing enhanced references - finding references from ID link...")
+
+		// Create target file with UUID
+		targetFile := "testdata/enhanced-ref-target.org"
+		absTargetFile, _ := filepath.Abs(targetFile)
+		targetContent := `* Target Heading
+:PROPERTIES:
+:ID:       33333333-3333-3333-3333-333333333333
+:END:
+This is the target.`
+
+		err = os.WriteFile(targetFile, []byte(targetContent), 0644)
+		require.NoError(t, err, "Failed to create target file")
+		defer os.Remove(targetFile)
+
+		// Create source file 1 with ID link - cursor will be placed here
+		sourceFile1 := "testdata/enhanced-ref-source1.org"
+		absSourceFile1, _ := filepath.Abs(sourceFile1)
+		sourceContent1 := `* Source File 1
+This file has the [[id:33333333-3333-3333-3333-333333333333][target link]] we'll query from.`
+
+		err = os.WriteFile(sourceFile1, []byte(sourceContent1), 0644)
+		require.NoError(t, err, "Failed to create source file 1")
+		defer os.Remove(sourceFile1)
+
+		// Create source file 2 with another reference to same UUID
+		sourceFile2 := "testdata/enhanced-ref-source2.org"
+		absSourceFile2, _ := filepath.Abs(sourceFile2)
+		sourceContent2 := `* Source File 2
+Another reference to [[id:33333333-3333-3333-3333-333333333333]].`
+
+		err = os.WriteFile(sourceFile2, []byte(sourceContent2), 0644)
+		require.NoError(t, err, "Failed to create source file 2")
+		defer os.Remove(sourceFile2)
+
+		// Re-scan to index new files
+		didSaveParams := protocol.DidSaveTextDocumentParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absTargetFile),
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didSave", didSaveParams); err != nil {
+			t.Fatalf("Failed to send didSave for target: %v", err)
+		}
+
+		time.Sleep(200 * time.Millisecond)
+
+		// Open source file 1 where the ID link is
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absSourceFile1),
+				LanguageID: "org",
+				Version:    1,
+				Text:       sourceContent1,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open source file 1: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		// Find cursor position on the ID link itself
+		// Place cursor right after "[[id:" to be on the link
+		idLinkLine, idLinkChar := findCursorPosition(sourceContent1, "[[id:")
+
+		// Request references from the ID link itself (not from headline)
+		referenceParams := protocol.ReferenceParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absSourceFile1),
+				},
+				Position: protocol.Position{
+					Line:      idLinkLine,
+					Character: idLinkChar + 5, // Inside the UUID part of the link
+				},
+			},
+			Context: protocol.ReferenceContext{
+				IncludeDeclaration: false,
+			},
+		}
+
+		var result []protocol.Location
+		err = jsonrpcConn.Call(ctx, "textDocument/references", referenceParams, &result)
+		require.NoError(t, err, "References request failed")
+		require.NotNil(t, result, "Expected non-nil references result")
+
+		// Should find 2 references: one in source1 (the link we're on), one in source2
+		// Note: the link we're querying from should be included in results
+		require.Len(t, result, 2, "Expected 2 references (1 in source1, 1 in source2)")
+
+		// Verify references are from the expected files
+		sourceURIs := make(map[string]bool)
+		for _, loc := range result {
+			sourceURIs[string(loc.URI)] = true
+		}
+
+		require.Contains(t, sourceURIs, "file://"+absSourceFile1, "Should have reference from source1")
+		require.Contains(t, sourceURIs, "file://"+absSourceFile2, "Should have reference from source2")
+		t.Logf("✅ Enhanced references successful! Found %d references from %d files when cursor was on ID link", len(result), len(sourceURIs))
+	})
+
+	// Test 5: File Link Completion
+	t.Run("FileLinkCompletion", func(t *testing.T) {
+		t.Log("Testing file link completion...")
+
+		// Create some test files that should appear in completion
+		testFile1 := "testdata/completion-file-target1.org"
+		absTestFile1, _ := filepath.Abs(testFile1)
+		err = os.WriteFile(testFile1, []byte("* Test File 1\nContent here."), 0644)
+		require.NoError(t, err, "Failed to create test file 1")
+		defer os.Remove(testFile1)
+
+		testFile2 := "testdata/completion-file-target2.org"
+		err = os.WriteFile(testFile2, []byte("* Test File 2\nMore content."), 0644)
+		require.NoError(t, err, "Failed to create test file 2")
+		defer os.Remove(testFile2)
+
+		// Re-scan to index new files
+		didSaveParams := protocol.DidSaveTextDocumentParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absTestFile1),
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didSave", didSaveParams); err != nil {
+			t.Fatalf("Failed to send didSave: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+
+		// Create source file with [[file: prefix
+		sourceFile := "testdata/completion-file-source.org"
+		absSourceFile, _ := filepath.Abs(sourceFile)
+		sourceContent := "* Source File\nLink to file: [[file:"
+
+		err = os.WriteFile(sourceFile, []byte(sourceContent), 0644)
+		require.NoError(t, err, "Failed to create source file")
+		defer os.Remove(sourceFile)
+
+		// Find cursor position after [[file:
+		fileLine, fileChar := findCursorPosition(sourceContent, "[[file:")
+
+		// Open source document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       sourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open source file: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		// Test file link completion
+		t.Log("Testing file link completion...")
+		completionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      fileLine,
+					Character: fileChar,
+				},
+			},
+		}
+
+		var completionResult *protocol.CompletionList
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", completionParams, &completionResult)
+		require.NoError(t, err, "Completion request failed")
+		require.NotNil(t, completionResult, "Expected completion result, got nil")
+
+		// Should have file completion items
+		var fileItems []protocol.CompletionItem
+		for _, item := range completionResult.Items {
+			if item.Kind != nil && *item.Kind == protocol.CompletionItemKindFile {
+				fileItems = append(fileItems, item)
+			}
+		}
+		require.NotEmpty(t, fileItems, "Expected file completion items")
+
+		// Check that our test files are in the results
+		foundFile1 := false
+		foundFile2 := false
+		for _, item := range fileItems {
+			if strings.Contains(item.Label, "completion-file-target1.org") {
+				foundFile1 = true
+			}
+			if strings.Contains(item.Label, "completion-file-target2.org") {
+				foundFile2 = true
+			}
+		}
+		require.True(t, foundFile1, "Expected to find completion-file-target1.org in file completions")
+		require.True(t, foundFile2, "Expected to find completion-file-target2.org in file completions")
+		t.Logf("✅ File link completion successful! Found %d file items", len(fileItems))
+	})
+
+	// Test 6: Block Type Completion
+	t.Run("BlockTypeCompletion", func(t *testing.T) {
+		t.Log("Testing block type completion...")
+
+		// Create source file with #+begin_ prefix
+		sourceFile := "testdata/completion-block-source.org"
+		absSourceFile, _ := filepath.Abs(sourceFile)
+		sourceContent := "#+begin_"
+
+		err = os.WriteFile(sourceFile, []byte(sourceContent), 0644)
+		require.NoError(t, err, "Failed to create source file")
+		defer os.Remove(sourceFile)
+
+		// Find cursor position after #+begin_
+		blockLine, blockChar := findCursorPosition(sourceContent, "#+begin_")
+
+		// Open source document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       sourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open source file: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		// Test block type completion
+		t.Log("Testing block type completion...")
+		completionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      blockLine,
+					Character: blockChar,
+				},
+			},
+		}
+
+		var completionResult *protocol.CompletionList
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", completionParams, &completionResult)
+		require.NoError(t, err, "Completion request failed")
+		require.NotNil(t, completionResult, "Expected completion result, got nil")
+
+		// Should have block type completion items (keyword kind)
+		var blockItems []protocol.CompletionItem
+		for _, item := range completionResult.Items {
+			if item.Kind != nil && *item.Kind == protocol.CompletionItemKindKeyword {
+				blockItems = append(blockItems, item)
+			}
+		}
+		require.NotEmpty(t, blockItems, "Expected block type completion items")
+
+		// Check that we have the expected block types
+		foundTypes := make(map[string]bool)
+		for _, item := range blockItems {
+			foundTypes[item.Label] = true
+		}
+
+		require.True(t, foundTypes["quote"], "Expected 'quote' block type")
+		require.True(t, foundTypes["src"], "Expected 'src' block type")
+		require.True(t, foundTypes["verse"], "Expected 'verse' block type")
+		t.Logf("✅ Block type completion successful! Found %d block types", len(blockItems))
+	})
+
+	// Test 7: Export Block Completion
+	t.Run("ExportBlockCompletion", func(t *testing.T) {
+		t.Log("Testing export block completion...")
+
+		// Create source file with #+begin_export_ prefix
+		sourceFile := "testdata/completion-export-source.org"
+		absSourceFile, _ := filepath.Abs(sourceFile)
+		sourceContent := "#+begin_export_"
+
+		err = os.WriteFile(sourceFile, []byte(sourceContent), 0644)
+		require.NoError(t, err, "Failed to create source file")
+		defer os.Remove(sourceFile)
+
+		// Find cursor position after #+begin_export_
+		exportLine, exportChar := findCursorPosition(sourceContent, "#+begin_export_")
+
+		// Open source document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       sourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open source file: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		// Test export block completion
+		t.Log("Testing export block completion...")
+		completionParams := protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: protocol.DocumentUri("file://" + absSourceFile),
+				},
+				Position: protocol.Position{
+					Line:      exportLine,
+					Character: exportChar,
+				},
+			},
+		}
+
+		var completionResult *protocol.CompletionList
+		err = jsonrpcConn.Call(ctx, "textDocument/completion", completionParams, &completionResult)
+		require.NoError(t, err, "Completion request failed")
+		require.NotNil(t, completionResult, "Expected completion result, got nil")
+
+		// Should have export block completion items (keyword kind)
+		var exportItems []protocol.CompletionItem
+		for _, item := range completionResult.Items {
+			if item.Kind != nil && *item.Kind == protocol.CompletionItemKindKeyword {
+				exportItems = append(exportItems, item)
+			}
+		}
+		require.NotEmpty(t, exportItems, "Expected export block completion items")
+
+		// Check that we have the expected export types
+		foundTypes := make(map[string]bool)
+		for _, item := range exportItems {
+			foundTypes[item.Label] = true
+		}
+
+		require.True(t, foundTypes["html"], "Expected 'html' export type")
+		require.True(t, foundTypes["latex"], "Expected 'latex' export type")
+		t.Logf("✅ Export block completion successful! Found %d export types", len(exportItems))
+	})
+
+	// Test 8: Shutdown
 	t.Run("Shutdown", func(t *testing.T) {
 		params := struct{}{}
 		var result any

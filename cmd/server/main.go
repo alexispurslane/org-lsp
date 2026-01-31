@@ -36,6 +36,9 @@ func main() {
 		}
 	} else {
 		slog.Info("org-lsp server starting", "mode", "stdio")
-		srv.RunStdio()
+		if err := srv.RunStdio(); err != nil {
+			fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }

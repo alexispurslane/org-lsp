@@ -126,12 +126,23 @@ ServerCapabilities{
 
 ### Capabilities Not in MVP
 
-- DocumentSymbolProvider
-- WorkspaceSymbolProvider
 - CodeLensProvider
 - FormattingProvider
 - DiagnosticsProvider
+- CallHierarchyProvider
+- TypeHierarchyProvider
 - All other advanced features
+
+### Phase 7 Capabilities (Advanced Features)
+
+```go
+ServerCapabilities{
+    // ... existing capabilities ...
+    DocumentSymbolProvider:     true,   // Outline view (headings & blocks)
+    WorkspaceSymbolProvider:    true,   // Cross-file symbol search
+    CodeActionProvider:         true,   // Heading/list conversion, code evaluation
+}
+```
 
 ## Feature Specifications
 
@@ -172,7 +183,7 @@ ServerCapabilities{
 1. Get current headline position from cursor
 2. Look up UUID at this position (from parsed `ProcessedFiles`)
 3. If no UUID at cursor, return nil
-4. Search workspace for all files with a type of "id" and a destination of "uuid" by walking ServerState.ProcessedFiles.FileInfo.Files[].ParsedOrg (see how we resolve UUIDs in the html writer of https://github.com/alexispurslane/oxen)
+4. Search workspace for all files for links with a type of "id" and a destination of "uuid" by walking ServerState.ProcessedFiles.FileInfo.Files[].ParsedOrg (see how we resolve UUIDs in the html writer of https://github.com/alexispurslane/oxen)
 5. Get the file location from that AST node
 6. Combine the lists of locations from all the files into one big location list and return it
 
@@ -263,6 +274,177 @@ Trigger patterns:
 
 **Note:** For MVP, document contents are synced but not written back to disk.
 
+### 6. Enhanced References (`textDocument/references` - ID Links)
+
+**Goal:** Find references to a UUID even when cursor is on the ID link itself (not just the heading)
+
+**Input:** `ReferenceParams` (same as standard references)
+
+**Logic Extension:**
+1. Check if cursor is on an `org.RegularLink` before checking for headline
+2. If link protocol is `id:`, extract UUID from link URL
+3. Call existing `findIDReferences()` with that UUID
+4. Falls back to existing headline UUID extraction if not on a link
+
+**Implementation Notes:**
+- Reuse `findNodeAtPosition[org.RegularLink]()` to detect link under cursor
+- Reuse existing `findIDReferences()` function - no new search logic needed
+- Add conditional before headline detection in references handler
+
+**Output:** `[]Location | nil`
+
+### 7. File Link Completion
+
+**Goal:** Autocomplete file paths after `[[file:`
+
+**Input:** `CompletionParams` with `[[file:` prefix before cursor
+
+**Logic:**
+1. Detect `[[file:` context (similar to `[[id:` detection)
+2. Extract partial path already typed after `file:`
+3. Search workspace files for matches:
+   - Match against `ProcessedFiles.Files[].Path`
+   - Filter by partial path prefix (case-insensitive)
+4. Return `CompletionItem` for each match:
+   - Label: filename or relative path
+   - InsertText: relative path from current file
+   - Kind: `CompletionItemKindFile`
+
+**Trigger:** `[[file:` pattern detected in `detectCompletionContext()`
+
+**Output:** `[]CompletionItem | CompletionList | nil`
+
+### 8. Block Type Completion
+
+**Goal:** Autocomplete block types after `#+begin_`
+
+**Block Types Supported:**
+- `quote` - Quotation block
+- `src` - Source code block
+- `verse` - Verse/poetry block
+
+**Logic:**
+1. Detect `#+begin_` prefix at cursor position
+2. Return static list of supported block types as `CompletionItemKindKeyword`
+3. Insert selected type, then add newline and `#+end_<type>` on subsequent line
+
+**Note:** Simple static completion - no dynamic behavior.
+
+**Output:** `[]CompletionItem | CompletionList | nil`
+
+### 8b. Export Block Completion
+
+**Goal:** Autocomplete export block types after `#+begin_export_`
+
+**Export Types Supported:**
+- `html` - HTML export block
+- `latex` - LaTeX export block
+
+**Logic:**
+1. Detect `#+begin_export_` prefix at cursor position
+2. Return static list of export types as `CompletionItemKindKeyword`
+3. Insert selected type, then add newline and `#+end_export` on subsequent line
+
+**Output:** `[]CompletionItem | CompletionList | nil`
+
+### 9. Document Symbols (`textDocument/documentSymbol`)
+
+**Goal:** Provide Zed outline view with headings
+
+**Input:** `DocumentSymbolParams{ TextDocument }`
+
+**Logic:**
+1. Get document from `OpenDocs` (unsaved changes) or `ProcessedFiles` (saved)
+2. Use `Document.Outline` which is a tree of `org.Section` nodes
+3. Each `Section` has:
+   - `Headline *Headline` - the heading
+   - `Parent *Section` - parent section (for hierarchy)
+   - `Children []*Section` - child sections (subheadings)
+4. Recursively traverse `Outline.Children`:
+   - Convert each `Section.Headline` to `DocumentSymbol`
+   - Use `Headline.Title` (render to string) as symbol name
+   - Use `Headline.Lvl` to determine `SymbolKind` (e.g., level 1 = Namespace, level 2 = Class, etc.)
+   - Use `Headline.Pos` for position/range
+   - Recursively set `Children` field from `Section.Children`
+5. Return symbol tree for outline view
+
+**Output:** `DocumentSymbol[] | nil`
+
+### 10. Workspace Symbols (`workspace/symbol`)
+
+**Goal:** Search across all workspace files for headings (flat list, no hierarchy)
+
+**Input:** `WorkspaceSymbolParams{ Query: string }`
+
+**Logic:**
+1. Iterate through `ProcessedFiles.UuidIndex` (sync.Map of UUID → `HeaderLocation`)
+2. For each entry:
+   - `HeaderLocation` contains `FilePath`, `Position`, and `Title`
+   - Match `Title` against query (substring/fuzzy match)
+   - Create `SymbolInformation` with:
+     - Name: heading title
+     - Kind: `SymbolKindInterface` (flat, all same kind)
+     - Location: file URI from `FilePath` + `Position`
+3. Return flat list of matches
+
+**Note:** No blocks, no hierarchy - just a searchable flat list of all UUID'd headings across workspace.
+
+**Output:** `[]SymbolInformation | nil`
+
+### 11. Code Actions: Heading/List Conversion
+
+**Goal:** Structural transformations between headings and lists
+
+**Actions:**
+1. **Heading → Ordered List:** Convert current heading and its subtree to numbered list
+2. **Heading → Unordered List:** Convert current heading and its subtree to bullet list
+3. **List → Heading:** Convert current list item and subitems to heading hierarchy
+
+**Input:** `CodeActionParams` with range covering heading or list item
+
+**Logic:**
+1. Detect node at position:
+   - `org.Headline` → convert to list (preserving subtree as nested items)
+   - `org.ListItem` → convert to heading (preserving subitems as nested headings)
+2. Generate text edit replacing original content
+3. Handle level arithmetic (heading levels map to list nesting depth)
+
+**Edge Cases:**
+- Mixed content in subtree (preserve non-heading/list content)
+- Multiple list items at same level (only convert the one under cursor)
+
+**Output:** `[]CodeAction | nil`
+
+### 12. Code Actions: Evaluate Code Block
+
+**Goal:** Execute src block and insert results below (org-babel style)
+
+**Action:** "Evaluate code block and insert result"
+
+**Input:** Cursor within `org.Block` of type `src`
+
+**Logic:**
+1. Detect src block at cursor position
+2. Extract:
+   - Language from block parameters (e.g., `#+begin_src python`)
+   - Code content from block body
+3. Map language to executable (hardcoded MVP mapping):
+   - `python` → `python3`
+   - `bash`/`sh` → `bash`
+   - `js`/`javascript` → `node`
+   - Additional languages as needed
+4. Execute code via `os/exec`, capture stdout
+5. Insert result below block as:
+   ```org
+   #+results:
+   <captured output>
+   ```
+6. Handle errors by showing stderr in hover/message
+
+**Safety:** No sandboxing in MVP - direct execution like org-babel.
+
+**Output:** `[]CodeAction | nil`
+
 ## Implementation Phases
 
 ### Phase 0: Foundation ✅ (Complete)
@@ -332,12 +514,15 @@ Trigger patterns:
 - [x] Document sync for change/close handlers
 - [x] **Architecture**: Depth-aware node finding with inline vs block detection
 
-## Post-MVP Future Work
-- [ ] Error handling for missing files/UUIDs (structured error responses)
-- [ ] Performance optimization (lazy loading, caching)
-- [ ] Configurable workspace scanning (exclude patterns, custom roots)
-- [ ] Document formatting provider
-- [ ] Diagnostics for broken links
+### Phase 7: Advanced Features 🚧 (In Progress)
+- [x] Enhanced References (ID Links) ✅
+- [x] File Link Completion ✅
+- [x] Block Type Completion (quote, src, verse) ✅
+- [x] Export Block Completion (html, latex) ✅
+- [ ] Document Symbols (Outline View)
+- [ ] Workspace Symbols
+- [ ] Code Actions: Heading<->List Conversion
+- [ ] Code Actions: Evaluate Code Block
 
 ### Logging Strategy
 
@@ -368,6 +553,6 @@ The server runs on stdio by default for LSP client compatibility.
 
 ---
 
-**Version:** 0.0.1  
+**Version:** 0.1.0  
 **Last Updated:** 2026-01-30
-**Status:** MVP Complete - Core Features Implemented
+**Status:** Phase 7 In Progress - Advanced Features (Link References, Completions, Symbols, Code Actions)
