@@ -350,7 +350,7 @@ Trigger patterns:
 
 **Output:** `[]CompletionItem | CompletionList | nil`
 
-### 9. Document Symbols (`textDocument/documentSymbol`)
+### 9. Document Symbols (`textDocument/documentSymbol`) ✅
 
 **Goal:** Provide Zed outline view with headings
 
@@ -373,7 +373,7 @@ Trigger patterns:
 
 **Output:** `DocumentSymbol[] | nil`
 
-### 10. Workspace Symbols (`workspace/symbol`)
+### 10. Workspace Symbols (`workspace/symbol`) ✅
 
 **Goal:** Search across all workspace files for headings (flat list, no hierarchy)
 
@@ -522,8 +522,8 @@ Trigger patterns:
 - [x] File Link Completion ✅
 - [x] Block Type Completion (quote, src, verse) ✅
 - [x] Export Block Completion (html, latex) ✅
-- [ ] Document Symbols (Outline View)
-- [ ] Workspace Symbols
+- [x] Document Symbols (Outline View)
+- [x] Workspace Symbols
 - [ ] Code Actions: Heading<->List Conversion
 - [ ] Code Actions: Evaluate Code Block
 

@@ -32,6 +32,7 @@ func New() *server.Server {
 		Shutdown:                        shutdown,
 		SetTrace:                        setTrace,
 		WorkspaceDidChangeConfiguration: workspaceDidChangeConfiguration,
+		WorkspaceSymbol:                 workspaceSymbol,
 		TextDocumentDidOpen:             textDocumentDidOpen,
 		TextDocumentDidChange:           textDocumentDidChange,
 		TextDocumentDidClose:            textDocumentDidClose,
@@ -40,6 +41,7 @@ func New() *server.Server {
 		TextDocumentHover:               textDocumentHover,
 		TextDocumentReferences:          textDocumentReferences,
 		TextDocumentCompletion:          textDocumentCompletion,
+		TextDocumentDocumentSymbol:      textDocumentDocumentSymbol,
 	}
 	slog.Debug("Handler created", "TextDocumentDefinition", handler.TextDocumentDefinition != nil, "TextDocumentHover", handler.TextDocumentHover != nil)
 	return server.NewServer(&handler, serverName, false)
@@ -63,6 +65,20 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 		}
 	}
 	slog.SetLogLoggerLevel(level)
+
+	// Log client info and capabilities
+	if params.ClientInfo != nil {
+		slog.Info("🔌 Client connected", "name", params.ClientInfo.Name, "version", params.ClientInfo.Version)
+	} else {
+		slog.Info("🔌 Client connected (no client info)")
+	}
+
+	// Check workspace symbol client capabilities
+	if params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Symbol != nil {
+		slog.Info("📋 Client workspace symbol capabilities", "dynamicRegistration", params.Capabilities.Workspace.Symbol.DynamicRegistration)
+	} else {
+		slog.Info("📋 Client has no workspace symbol capabilities")
+	}
 
 	serverState = &State{}
 	serverState.OpenDocs = make(map[protocol.DocumentUri]*org.Document)
@@ -98,15 +114,23 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 				IncludeText: truePtr,
 			},
 		},
-		HoverProvider:      truePtr,
-		DefinitionProvider: truePtr,
-		ReferencesProvider: truePtr,
+		HoverProvider:           truePtr,
+		DefinitionProvider:      truePtr,
+		ReferencesProvider:      truePtr,
+		DocumentSymbolProvider:  truePtr,
+		WorkspaceSymbolProvider: truePtr,
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{":", "_"},
 		},
 	}
 
-	slog.Debug("Initialize response", "DefinitionProvider", capabilities.DefinitionProvider, "HoverProvider", capabilities.HoverProvider)
+	slog.Info("📤 Initialize response",
+		"DefinitionProvider", capabilities.DefinitionProvider != nil,
+		"HoverProvider", capabilities.HoverProvider != nil,
+		"DocumentSymbolProvider", capabilities.DocumentSymbolProvider != nil,
+		"WorkspaceSymbolProvider", capabilities.WorkspaceSymbolProvider != nil,
+		"ReferencesProvider", capabilities.ReferencesProvider != nil,
+		"CompletionProvider", capabilities.CompletionProvider != nil)
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
 		ServerInfo: &protocol.InitializeResultServerInfo{

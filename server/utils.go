@@ -35,6 +35,19 @@ func uriToPath(uri string) string {
 	return path
 }
 
+// pathToURI converts a filesystem path to a file:// URI
+func pathToURI(path string) string {
+	// Ensure path is absolute for valid file URI (RFC 8089)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	// Convert to forward slashes and prepend file://
+	// Note: filepath.Abs on Unix returns /absolute/path, so we get file:///absolute/path
+	// On Windows, it returns C:\path, so we get file://C:/path (which is correct)
+	return "file://" + filepath.ToSlash(absPath)
+}
+
 // findNodeAtPosition searches for a node of type T at the given cursor position
 func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*T, bool) {
 	if doc == nil {

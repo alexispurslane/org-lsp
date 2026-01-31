@@ -1424,7 +1424,216 @@ Another reference to [[id:33333333-3333-3333-3333-333333333333]].`
 		t.Logf("✅ Export block completion successful! Found %d export types", len(exportItems))
 	})
 
-	// Test 8: Shutdown
+	// Test 9: Document Symbols
+	t.Run("DocumentSymbols", func(t *testing.T) {
+		t.Log("Testing document symbols...")
+
+		// Create source file with nested headings
+		sourceFile := "testdata/document-symbols.org"
+		absSourceFile, _ := filepath.Abs(sourceFile)
+		sourceContent := `* First Level Heading
+Some content here.
+
+** Second Level Heading
+More content.
+
+*** Third Level Heading
+Deep content.
+
+** Another Second Level
+More stuff.
+
+* Another First Level
+Final content.
+`
+
+		err = os.WriteFile(sourceFile, []byte(sourceContent), 0644)
+		require.NoError(t, err, "Failed to create source file")
+		defer os.Remove(sourceFile)
+
+		// Open source document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absSourceFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       sourceContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open source file: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		// Request document symbols
+		t.Log("Requesting document symbols...")
+		symbolParams := protocol.DocumentSymbolParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absSourceFile),
+			},
+		}
+
+		var symbols []protocol.DocumentSymbol
+		err = jsonrpcConn.Call(ctx, "textDocument/documentSymbol", symbolParams, &symbols)
+		require.NoError(t, err, "Document symbol request failed")
+		require.NotNil(t, symbols, "Expected symbols result")
+		require.NotEmpty(t, symbols, "Expected non-empty symbols")
+
+		// Check top-level symbols
+		require.GreaterOrEqual(t, len(symbols), 2, "Expected at least 2 top-level headings")
+
+		// Find first level heading
+		var foundFirstLevel bool
+		var foundSecondLevel bool
+		var foundThirdLevel bool
+
+		for _, sym := range symbols {
+			if sym.Name == "First Level Heading" {
+				foundFirstLevel = true
+				assert.Equal(t, protocol.SymbolKindNamespace, sym.Kind, "First level should be Namespace")
+				assert.GreaterOrEqual(t, len(sym.Children), 2, "First level should have children")
+
+				// Check children
+				for _, child := range sym.Children {
+					if child.Name == "Second Level Heading" {
+						foundSecondLevel = true
+						assert.Equal(t, protocol.SymbolKindClass, child.Kind, "Second level should be Class")
+						assert.GreaterOrEqual(t, len(child.Children), 1, "Second level should have children")
+
+						// Check grandchild
+						for _, grandchild := range child.Children {
+							if grandchild.Name == "Third Level Heading" {
+								foundThirdLevel = true
+								assert.Equal(t, protocol.SymbolKindMethod, grandchild.Kind, "Third level should be Method")
+							}
+						}
+					}
+				}
+			}
+		}
+
+		require.True(t, foundFirstLevel, "Expected to find 'First Level Heading'")
+		require.True(t, foundSecondLevel, "Expected to find 'Second Level Heading'")
+		require.True(t, foundThirdLevel, "Expected to find 'Third Level Heading'")
+
+		t.Logf("✅ Document symbols successful! Found %d top-level symbols", len(symbols))
+	})
+
+	// Test 9b: Workspace Symbols
+	t.Run("WorkspaceSymbols", func(t *testing.T) {
+		t.Log("Testing workspace symbols...")
+
+		// Create first file with UUID headings
+		file1 := "testdata/workspace-symbols-1.org"
+		absFile1, _ := filepath.Abs(file1)
+		content1 := `* Project Alpha :work:
+:PROPERTIES:
+:ID:       11111111-1111-1111-1111-111111111111
+:END:
+First project description.
+
+* Meeting Notes
+:PROPERTIES:
+:ID:       22222222-2222-2222-2222-222222222222
+:END:
+Meeting content here.
+** Action Items
+Some actions.
+`
+
+		err = os.WriteFile(file1, []byte(content1), 0644)
+		require.NoError(t, err, "Failed to create workspace file 1")
+		defer os.Remove(file1)
+
+		// Create second file with UUID headings
+		file2 := "testdata/workspace-symbols-2.org"
+		content2 := `* Project Beta :personal:
+:PROPERTIES:
+:ID:       33333333-3333-3333-3333-333333333333
+:END:
+Second project description.
+
+* Shopping List
+:PROPERTIES:
+:ID:       44444444-4444-4444-4444-444444444444
+:END:
+Items to buy.
+`
+
+		err = os.WriteFile(file2, []byte(content2), 0644)
+		require.NoError(t, err, "Failed to create workspace file 2")
+		defer os.Remove(file2)
+
+		// Trigger re-scan by saving one file to index UUIDs
+		t.Log("Triggering re-scan to index UUIDs...")
+		didSaveParams := protocol.DidSaveTextDocumentParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absFile1),
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didSave", didSaveParams); err != nil {
+			t.Fatalf("Failed to notify save: %v", err)
+		}
+		time.Sleep(300 * time.Millisecond) // Wait for re-scan
+
+		// Test 1: Empty query should return all symbols
+		t.Log("Testing workspace symbols with empty query...")
+		var allSymbols []protocol.SymbolInformation
+		workspaceParams := protocol.WorkspaceSymbolParams{Query: ""}
+		err = jsonrpcConn.Call(ctx, "workspace/symbol", workspaceParams, &allSymbols)
+		require.NoError(t, err, "Workspace symbol request failed")
+		require.NotNil(t, allSymbols, "Expected symbols result")
+		require.GreaterOrEqual(t, len(allSymbols), 4, "Expected at least 4 indexed headings")
+
+		// Verify we can find our specific headings
+		var foundProjectAlpha, foundProjectBeta, foundMeeting, foundShopping bool
+		for _, sym := range allSymbols {
+			if sym.Name == "Project Alpha" {
+				foundProjectAlpha = true
+				assert.Equal(t, protocol.SymbolKindInterface, sym.Kind, "Workspace symbols should be Interface kind")
+				assert.Contains(t, string(sym.Location.URI), "workspace-symbols-1.org")
+			}
+			if sym.Name == "Project Beta" {
+				foundProjectBeta = true
+				assert.Contains(t, string(sym.Location.URI), "workspace-symbols-2.org")
+			}
+			if sym.Name == "Meeting Notes" {
+				foundMeeting = true
+			}
+			if sym.Name == "Shopping List" {
+				foundShopping = true
+			}
+		}
+		require.True(t, foundProjectAlpha, "Expected to find 'Project Alpha'")
+		require.True(t, foundProjectBeta, "Expected to find 'Project Beta'")
+		require.True(t, foundMeeting, "Expected to find 'Meeting Notes'")
+		require.True(t, foundShopping, "Expected to find 'Shopping List'")
+
+		// Test 2: Query filtering - search for "Project"
+		t.Log("Testing workspace symbols with 'Project' query...")
+		var projectSymbols []protocol.SymbolInformation
+		workspaceParams = protocol.WorkspaceSymbolParams{Query: "Project"}
+		err = jsonrpcConn.Call(ctx, "workspace/symbol", workspaceParams, &projectSymbols)
+		require.NoError(t, err, "Workspace symbol query failed")
+		require.NotEmpty(t, projectSymbols, "Expected filtered results for 'Project'")
+
+		for _, sym := range projectSymbols {
+			assert.Contains(t, strings.ToLower(sym.Name), "project", "All results should contain 'project'")
+		}
+
+		// Test 3: Query filtering - search for "shopping" (case insensitive)
+		t.Log("Testing workspace symbols with 'shopping' query...")
+		var shoppingSymbols []protocol.SymbolInformation
+		workspaceParams = protocol.WorkspaceSymbolParams{Query: "shopping"}
+		err = jsonrpcConn.Call(ctx, "workspace/symbol", workspaceParams, &shoppingSymbols)
+		require.NoError(t, err, "Workspace symbol query failed")
+		require.Len(t, shoppingSymbols, 1, "Expected exactly 1 result for 'shopping'")
+		assert.Equal(t, "Shopping List", shoppingSymbols[0].Name)
+
+		t.Logf("✅ Workspace symbols successful! Found %d total symbols, %d project matches", len(allSymbols), len(projectSymbols))
+	})
+
+	// Test 10: Shutdown
 	t.Run("Shutdown", func(t *testing.T) {
 		params := struct{}{}
 		var result any

@@ -181,6 +181,17 @@ item := protocol.CompletionItem{
 
 **Additionally**: Use `TextEdit` with a calculated range instead of `InsertText` to prevent duplication. When the user has typed `#+begin_s` and selects the completion, the server must replace the entire `#+begin_s` prefix, not just insert at the cursor position.
 
+### 5. Documentation-fetching
+
+LSP Protocol types are in a versioned subdirectory (`protocol_3_16`). Use `go doc github.com/tliron/glsp/protocol_3_16 <TypeName>` to inspect types (e.g., `go doc github.com/tliron/glsp/protocol_3_16 WorkspaceSymbolFunc`).
+
+### 6. Always use pathToURI when passing paths to an LSP client
+
+All paths sent to an LSP client must be *absolute* URIs; for Helix at least, the
+response won't even parse if they aren't, since Helix uses Rust's type system to
+exactly enforce the proper LSP spec. But even if that wasn't the case, paths
+wouldn't work right without being absolute!
+
 ## Logging Conventions
 
 ### Log Levels
@@ -287,8 +298,3 @@ location := protocol.Location{...} // Not map[string]interface{}
 - Hover extracts context lines via `os.ReadFile()` - consider caching for large files
 - UUID index uses `sync.Map` for concurrent access
 - Document parsing happens on open/change/save
-
---- 
-
-**Last Updated**: 2024-01-27
-**Maintainer**: @alexispurslane
