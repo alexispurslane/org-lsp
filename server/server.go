@@ -42,6 +42,7 @@ func New() *server.Server {
 		TextDocumentReferences:          textDocumentReferences,
 		TextDocumentCompletion:          textDocumentCompletion,
 		TextDocumentDocumentSymbol:      textDocumentDocumentSymbol,
+		TextDocumentCodeAction:          textDocumentCodeAction,
 	}
 	slog.Debug("Handler created", "TextDocumentDefinition", handler.TextDocumentDefinition != nil, "TextDocumentHover", handler.TextDocumentHover != nil)
 	return server.NewServer(&handler, serverName, false)
@@ -96,7 +97,12 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 		if err != nil {
 			slog.Error("Failed to scan org files", "error", err)
 		} else {
-			slog.Info("Completed org file scan", "files_scanned", len(serverState.Scanner.ProcessedFiles.Files), "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
+			fileCount := 0
+			serverState.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
+				fileCount++
+				return true
+			})
+			slog.Info("Completed org file scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
 		}
 	}
 
@@ -122,6 +128,7 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{":", "_"},
 		},
+		CodeActionProvider: truePtr,
 	}
 
 	slog.Info("📤 Initialize response",
@@ -241,7 +248,12 @@ func textDocumentDidSave(context *glsp.Context, params *protocol.DidSaveTextDocu
 		if err != nil {
 			slog.Error("Failed to re-scan org files", "error", err)
 		} else {
-			slog.Info("Completed org file re-scan", "files_scanned", len(serverState.Scanner.ProcessedFiles.Files), "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
+			fileCount := 0
+			serverState.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
+				fileCount++
+				return true
+			})
+			slog.Info("Completed org file re-scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
 		}
 	}
 	return nil

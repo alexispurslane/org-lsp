@@ -3,7 +3,6 @@ package server
 import (
 	"net/url"
 	"path/filepath"
-	"reflect"
 
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
@@ -48,6 +47,46 @@ func pathToURI(path string) string {
 	return "file://" + filepath.ToSlash(absPath)
 }
 
+func collectChildren(node org.Node) []org.Node {
+	var nodes []org.Node
+	node.Range(func(n org.Node) bool {
+		nodes = append(nodes, n)
+		return true
+	})
+	return nodes
+}
+
+func findNodesInRange(nodes []org.Node, startLine, endLine int) []org.Node {
+	var results []org.Node
+
+	var walk func(node org.Node) bool
+	walk = func(node org.Node) bool {
+		pos := node.Position()
+
+		// Check if this node overlaps with our selection range
+		if pos.StartLine <= endLine && pos.EndLine >= startLine {
+			// If it's completely inside, or the top is inside, then we should add it to our list
+			fullyContained := pos.StartLine >= startLine && pos.EndLine <= endLine
+			topOverlaps := pos.StartLine >= startLine && pos.EndLine >= endLine
+			if fullyContained || topOverlaps {
+				results = append(results, node)
+			} else {
+				// If it is only overlapping, then we should investigate it for children that satisfy our criteria
+				node.Range(func(n org.Node) bool {
+					return walk(n)
+				})
+			}
+		}
+
+		return true
+	}
+
+	for _, node := range nodes {
+		walk(node)
+	}
+	return results
+}
+
 // findNodeAtPosition searches for a node of type T at the given cursor position
 func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*T, bool) {
 	if doc == nil {
@@ -63,29 +102,7 @@ func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*
 
 	var walkNodes func(node org.Node, currentDepth int)
 	walkNodes = func(node org.Node, currentDepth int) {
-
-		// Use reflection to access Pos field on any node type
-		nodeVal := reflect.ValueOf(node)
-		var nodePos org.Position
-		hasPos := false
-
-		if nodeVal.Kind() == reflect.Struct {
-			posField := nodeVal.FieldByName("Pos")
-			if posField.IsValid() && posField.Type() == reflect.TypeFor[org.Position]() {
-				nodePos = posField.Interface().(org.Position)
-				hasPos = true
-			}
-		}
-
-		if !hasPos {
-			// Always walk children even without position info
-			if children := getChildren(node); children != nil {
-				for _, child := range children {
-					walkNodes(child, currentDepth+1)
-				}
-			}
-			return
-		}
+		nodePos := node.Position()
 
 		// Determine if this is an inline node (requires precise column match) or block node (line-only match)
 		var isInline bool
@@ -113,15 +130,13 @@ func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*
 			}
 		}
 
-		// Always walk children to find more specific matches
-		if children := getChildren(node); children != nil {
-			for _, child := range children {
-				walkNodes(child, currentDepth+1)
-			}
-		}
+		node.Range(func(n org.Node) bool {
+			walkNodes(n, currentDepth+1)
+			return true
+		})
 	}
 
-	// Walk all document nodes
+	// Walk all document node
 	for _, node := range doc.Nodes {
 		walkNodes(node, 0)
 	}
@@ -132,31 +147,6 @@ func findNodeAtPosition[T org.Node](doc *org.Document, pos protocol.Position) (*
 
 	var zero T
 	return &zero, false
-}
-
-// getChildren returns the children of a node by finding Children or Content fields via reflection
-func getChildren(node org.Node) []org.Node {
-	if node == nil {
-		return nil
-	}
-
-	nodeVal := reflect.ValueOf(node)
-
-	// Try to find a Children field of type []org.Node
-	if childrenField := nodeVal.FieldByName("Children"); childrenField.IsValid() {
-		if children, ok := childrenField.Interface().([]org.Node); ok {
-			return children
-		}
-	}
-
-	// Try to find a Content field of type []org.Node (used by Emphasis, etc.)
-	if contentField := nodeVal.FieldByName("Content"); contentField.IsValid() {
-		if content, ok := contentField.Interface().([]org.Node); ok {
-			return content
-		}
-	}
-
-	return nil
 }
 
 // ptrTo returns a pointer to the given value

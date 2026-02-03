@@ -9,6 +9,11 @@ A minimal Language Server Protocol (LSP) implementation for [org-mode](https://o
 - **Hover previews**: See context when hovering over links
 - **ID-link autocompletion**: Complete `id:` references with heading titles, insert full UUIDs
 - **Tag completion**: Autocomplete `:tags:` based on scanned org files
+- **File link completion**: Complete `file:` links with workspace org files
+- **Block completion**: Autocomplete block types (`#+begin_src`, `#+begin_quote`, etc.)
+- **Export block completion**: Autocomplete export formats (`#+begin_export html`, etc.)
+- **Document symbols**: Outline view of all headings in the current file
+- **Workspace symbols**: Global search across all indexed headings and UUIDs
 - **Document sync**: Full support for open, change, save, and close operations
 
 ## Installation
@@ -191,11 +196,5 @@ Please see [AGENTS.md](AGENTS.md) for detailed development guidelines. Key point
 ## License
 
 BSD Zero-Clause (Public Domain equivalent) - see [LICENSE](LICENSE) file for details.
-
-## Status
-
-**Version:** 0.0.1  
-**Last Updated:** 2026-01-30  
-**Status:** MVP Complete - All core features implemented and tested
 
 For complete feature specifications and implementation details, see [SPEC.md](SPEC.md).

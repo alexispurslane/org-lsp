@@ -297,10 +297,11 @@ func findIDReferences(targetUUID string) ([]protocol.Location, error) {
 
 	var locations []protocol.Location
 
-	// Walk through all processed files
-	for _, fileInfo := range serverState.Scanner.ProcessedFiles.Files {
-		if fileInfo.ParsedOrg == nil {
-			continue
+	// Walk through all processed files using sync.Map.Range
+	serverState.Scanner.ProcessedFiles.Files.Range(func(key, value any) bool {
+		fileInfo, ok := value.(*orgscanner.FileInfo)
+		if !ok || fileInfo.ParsedOrg == nil {
+			return true // continue iteration
 		}
 
 		// Search for links in this file
@@ -325,17 +326,17 @@ func findIDReferences(targetUUID string) ([]protocol.Location, error) {
 			}
 
 			// Walk children
-			if children := getChildren(node); children != nil {
-				for _, child := range children {
-					walkNodes(child)
-				}
-			}
+			node.Range(func(n org.Node) bool {
+				walkNodes(n)
+				return true
+			})
 		}
 
 		for _, node := range fileInfo.ParsedOrg.Nodes {
 			walkNodes(node)
 		}
-	}
+		return true // continue iteration
+	})
 
 	return locations, nil
 }

@@ -37,19 +37,25 @@ func (s *OrgScanner) scanUnlocked() ([]FileMessage, error) {
 
 	// Build a lookup set for the files we've already processed
 	existingFiles := make(map[string]*FileInfo)
-	for _, f := range s.ProcessedFiles.Files {
-		existingFiles[f.Path] = f
-	}
+	s.ProcessedFiles.Files.Range(func(key, value any) bool {
+		if f, ok := value.(*FileInfo); ok {
+			existingFiles[f.Path] = f
+		}
+		return true
+	})
 
 	// Check for deleted files
-	for _, f := range s.ProcessedFiles.Files {
-		if _, exists := currentFiles[f.Path]; !exists {
-			messages = append(messages, FileMessage{
-				Action: ShouldDelete,
-				Info:   f,
-			})
+	s.ProcessedFiles.Files.Range(func(key, value any) bool {
+		if f, ok := value.(*FileInfo); ok {
+			if _, exists := currentFiles[f.Path]; !exists {
+				messages = append(messages, FileMessage{
+					Action: ShouldDelete,
+					Info:   f,
+				})
+			}
 		}
-	}
+		return true
+	})
 
 	// Check for new or modified files
 	for _, file := range diskFiles {

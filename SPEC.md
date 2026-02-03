@@ -71,14 +71,14 @@ type DocumentUri string
 | `UUID` | string | Used for ID-link resolution and backlinks |
 | `FileInfo.Preview` | `Hover` | Content preview on link hover |
 | `FileInfo.Tags` | `CompletionItem` | Tag-based tag suggestions |
-| `ProcessedFiles.TagMap` | `CompletionItem` | Global tag index |
+| `TagMap[tag][path]` | `CompletionItem` | Global tag index (set of file paths per tag) |
 
 ### Server State
 
 ```go
 type ServerState struct {
     RootDir     string                       // Workspace root path
-    Processed   *ProcessedFiles              // From orgscanner.Process()
+    Scanner     *OrgScanner                  // Incremental file scanner with index
     OpenDocs    map[string]*org.Document     // Currently open documents
     DocVersions map[string]int32             // Document version tracking
 }
@@ -524,8 +524,13 @@ Trigger patterns:
 - [x] Export Block Completion (html, latex) ✅
 - [x] Document Symbols (Outline View)
 - [x] Workspace Symbols
-- [ ] Code Actions: Heading<->List Conversion
-- [ ] Code Actions: Evaluate Code Block
+- [ ] Code Actions
+  - [x] Heading tree<->Nested list conversions
+  - [ ] On save, make sure all headings have a property drawer with a UUID
+  - [ ] Inserting a new header
+  - [ ] Switching a header from TODO->NEXT->DONE->unlabeled->TODO
+  - [ ] Wrap selection in quote or src block
+  - [ ] Code block running
 
 ### Logging Strategy
 

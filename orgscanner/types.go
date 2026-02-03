@@ -52,7 +52,7 @@ func (f FileInfo) Equal(other FileInfo) bool {
 
 // ProcessedFiles holds the results of scanning and parsing org files.
 type ProcessedFiles struct {
-	Files     map[string]*FileInfo       // path -> file info
+	Files     sync.Map                   // map[string]*FileInfo - path -> file info pointer
 	UuidIndex sync.Map                   // map[UUID]HeaderLocation
 	TagMap    map[string]map[string]bool // tag -> set of file paths
 }

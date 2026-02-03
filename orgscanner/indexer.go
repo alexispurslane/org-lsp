@@ -11,7 +11,7 @@ import (
 func NewOrgScanner(root string) *OrgScanner {
 	return &OrgScanner{
 		ProcessedFiles: &ProcessedFiles{
-			Files:     make(map[string]*FileInfo),
+			Files:     sync.Map{},
 			UuidIndex: sync.Map{},
 			TagMap:    make(map[string]map[string]bool),
 		},
@@ -59,7 +59,7 @@ func (s *OrgScanner) Process() error {
 		}
 
 		// Remove from Files map
-		delete(s.ProcessedFiles.Files, path)
+		s.ProcessedFiles.Files.Delete(path)
 		slog.Debug("Removed file from index", "path", path)
 	}
 
@@ -83,9 +83,11 @@ func (s *OrgScanner) Process() error {
 			}
 
 			// Remove old UUIDs for this file if it exists (re-parsing case)
-			if oldFile, exists := s.ProcessedFiles.Files[parsed.Path]; exists {
-				for uuid := range oldFile.UUIDs {
-					s.ProcessedFiles.UuidIndex.Delete(uuid)
+			if oldFileData, exists := s.ProcessedFiles.Files.Load(parsed.Path); exists {
+				if oldFile, ok := oldFileData.(*FileInfo); ok {
+					for uuid := range oldFile.UUIDs {
+						s.ProcessedFiles.UuidIndex.Delete(uuid)
+					}
 				}
 			}
 
@@ -111,15 +113,20 @@ func (s *OrgScanner) Process() error {
 			}
 
 			// Store/Update in Files map (as pointer)
-			s.ProcessedFiles.Files[parsed.Path] = parsed
+			s.ProcessedFiles.Files.Store(parsed.Path, parsed)
 		}(msg)
 	}
 	wg.Wait()
 	s.LastScanTime = time.Now()
 
+	fileCount := 0
+	s.ProcessedFiles.Files.Range(func(_, _ any) bool {
+		fileCount++
+		return true
+	})
 	slog.Info("Incremental scan complete",
 		"messages_processed", len(messages),
-		"files_total", len(s.ProcessedFiles.Files))
+		"files_total", fileCount)
 
 	return nil
 }

@@ -323,12 +323,17 @@ func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
 	var items []protocol.CompletionItem
 	filterLower := strings.ToLower(ctx.FilterPrefix)
 
-	// Walk through all processed files
-	for _, fileInfo := range serverState.Scanner.ProcessedFiles.Files {
+	// Walk through all processed files using sync.Map.Range
+	serverState.Scanner.ProcessedFiles.Files.Range(func(key, value any) bool {
+		fileInfo, ok := value.(*orgscanner.FileInfo)
+		if !ok {
+			return true // continue iteration
+		}
+
 		// Filter by partial path prefix (case-insensitive)
 		filePathLower := strings.ToLower(fileInfo.Path)
 		if filterLower != "" && !strings.Contains(filePathLower, filterLower) {
-			continue
+			return true // continue iteration
 		}
 
 		// Create completion item
@@ -346,7 +351,8 @@ func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
 		item.InsertText = strPtr(insertText)
 
 		items = append(items, item)
-	}
+		return true // continue iteration
+	})
 
 	slog.Debug("File completion generated", "itemCount", len(items), "filter", ctx.FilterPrefix)
 	return items

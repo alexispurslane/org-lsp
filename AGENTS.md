@@ -49,10 +49,10 @@ org-lsp/
 Server state is a global singleton accessed via `serverState` pointer, initialized in `initialize()`:
 ```go
 type ServerState struct {
-    OrgScanRoot     string
-    ProcessedFiles  *orgscanner.ProcessedFiles
-    OpenDocs        map[protocol.DocumentUri]*org.Document
-    DocVersions     map[protocol.DocumentUri]int32
+    OrgScanRoot  string
+    Scanner      *orgscanner.OrgScanner  // Incremental org file scanner
+    OpenDocs     map[protocol.DocumentUri]*org.Document
+    DocVersions  map[protocol.DocumentUri]int32
 }
 ```
 
@@ -296,5 +296,6 @@ location := protocol.Location{...} // Not map[string]interface{}
 ## Performance Notes
 - orgscanner re-parses on file save (blocking operation)
 - Hover extracts context lines via `os.ReadFile()` - consider caching for large files
-- UUID index uses `sync.Map` for concurrent access
+- UUID index uses `sync.Map` for concurrent access during parsing
+- Files map and TagMap are regular Go maps protected by scanner mutex (O(1) lookups)
 - Document parsing happens on open/change/save
