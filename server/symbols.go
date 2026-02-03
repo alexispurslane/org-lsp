@@ -147,11 +147,11 @@ func sectionToSymbol(section *org.Section) protocol.DocumentSymbol {
 	// Create range from headline position
 	selectionRange := protocol.Range{
 		Start: protocol.Position{
-			Line:      protocol.UInteger(headline.Pos.StartLine - 1), // Convert to 0-indexed
+			Line:      protocol.UInteger(headline.Pos.StartLine),
 			Character: protocol.UInteger(headline.Pos.StartColumn),
 		},
 		End: protocol.Position{
-			Line:      protocol.UInteger(headline.Pos.EndLine - 1),
+			Line:      protocol.UInteger(headline.Pos.EndLine),
 			Character: protocol.UInteger(headline.Pos.EndColumn),
 		},
 	}

@@ -62,10 +62,9 @@ func textDocumentCodeAction(context *glsp.Context, params *protocol.CodeActionPa
 	}
 
 	// Check for code block evaluation (single block at cursor only)
-	if block, found := findNodeAtPosition[org.Block](doc, cursorPos); found && block.Name == "src" {
+	if block, found := findNodeAtPosition[org.Block](doc, cursorPos); found && strings.EqualFold(block.Name, "src") {
 		actions = append(actions, getCodeBlockAction(*block, uri))
 	}
-
 	return actions, nil
 }
 
@@ -155,26 +154,13 @@ func getListConversionAction(list org.List, doc *org.Document, uri protocol.Docu
 	newText := org.String(headings...)
 
 	// Build text edit for the list
-
-	// Clamp edit range to user's selection to avoid deleting content outside selection
-	// This works around potential parser bugs with list positions
-	// Only use selection as fallback when list position is zero (parser bug workaround)
-	startLine := listPos.StartLine
-	if startLine == 0 {
-		startLine = int(selectionRange.Start.Line)
-	}
-	endLine := listPos.EndLine
-	if endLine == 0 {
-		endLine = int(selectionRange.End.Line)
-	}
-
 	editRange := protocol.Range{
 		Start: protocol.Position{
-			Line:      protocol.UInteger(startLine),
+			Line:      protocol.UInteger(listPos.StartLine),
 			Character: 0,
 		},
 		End: protocol.Position{
-			Line:      protocol.UInteger(endLine),
+			Line:      protocol.UInteger(listPos.EndLine),
 			Character: 0,
 		},
 	}
@@ -440,19 +426,24 @@ func getCodeBlockAction(block org.Block, uri protocol.DocumentUri) protocol.Code
 // ExecuteCodeBlock executes the code in a src block and returns the result.
 // This is called via workspace/executeCommand.
 func ExecuteCodeBlock(uri protocol.DocumentUri, line, column int) (string, error) {
+	slog.Debug("Executing code block", "uri", uri, "line", line, "column", column)
+
 	if serverState == nil {
+		slog.Debug("Server state nil", "error", "server state not initialized")
 		return "", fmt.Errorf("server state not initialized")
 	}
 
 	doc, ok := serverState.OpenDocs[uri]
 	if !ok {
+		slog.Debug("Document not found", "uri", uri)
 		return "", fmt.Errorf("document not found")
 	}
 
 	// Find the block at the given position
 	pos := protocol.Position{Line: uint32(line), Character: uint32(column)}
 	block, found := findNodeAtPosition[org.Block](doc, pos)
-	if !found || block.Name != "src" {
+	if !found || !strings.EqualFold(block.Name, "src") {
+		slog.Debug("Block not found or not src", "found", found, "blockName", block.Name)
 		return "", fmt.Errorf("no src block found at position")
 	}
 
@@ -460,12 +451,15 @@ func ExecuteCodeBlock(uri protocol.DocumentUri, line, column int) (string, error
 	if len(block.Parameters) > 0 {
 		lang = block.Parameters[0]
 	}
+	slog.Debug("Block details", "lang", lang, "pos", block.Pos, "parameters", block.Parameters)
 
 	// Extract code from block children
 	code := org.String(block.Children...)
 	if code == "" {
+		slog.Debug("No code content in block", "children", len(block.Children))
 		return "", fmt.Errorf("no code content found in block")
 	}
+	slog.Debug("Code extracted", "codeLen", len(code), "code", code)
 
 	// Map language to executable
 	var cmd *exec.Cmd
@@ -479,15 +473,18 @@ func ExecuteCodeBlock(uri protocol.DocumentUri, line, column int) (string, error
 	case "ruby":
 		cmd = exec.Command("ruby", "-e", code)
 	default:
+		slog.Debug("Language not supported", "lang", lang, "code", code)
 		return "", fmt.Errorf("unsupported language: %s", lang)
 	}
+	slog.Debug("Command created", "command", cmd, "cmdName", cmd.Args[0])
 
 	// Execute and capture output
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("Code execution failed", "error", err, "output", string(output))
+		slog.Error("Code execution failed", "error", err, "exitCode", cmd.ProcessState.ExitCode(), "output", string(output))
 		return fmt.Sprintf("Error: %v\nOutput: %s", err, string(output)), nil
 	}
 
+	slog.Debug("Code execution successful", "outputLen", len(output))
 	return string(output), nil
 }

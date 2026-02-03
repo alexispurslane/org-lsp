@@ -399,14 +399,14 @@ Trigger patterns:
 **Goal:** Structural transformations between headings and lists
 
 **Actions:**
-1. **Heading → Ordered List:** Convert current heading and its subtree to numbered list
-2. **Heading → Unordered List:** Convert current heading and its subtree to bullet list
-3. **List → Heading:** Convert current list item and subitems to heading hierarchy
+1. **Heading → Ordered List:** Convert selected headings and their children subtree to numbered list
+2. **Heading → Unordered List:** Same as above, but to a bullet list
+3. **List → Heading:** Convert current list item and subitems to heading hierarchy, with the starting heading hierarchy level based on the parent heading
 
 **Input:** `CodeActionParams` with range covering heading or list item
 
 **Logic:**
-1. Detect node at position:
+1. Detect nodes within range:
    - `org.Headline` → convert to list (preserving subtree as nested items)
    - `org.ListItem` → convert to heading (preserving subitems as nested headings)
 2. Generate text edit replacing original content
@@ -527,7 +527,6 @@ Trigger patterns:
 - [ ] Code Actions
   - [x] Heading tree<->Nested list conversions
   - [ ] On save, make sure all headings have a property drawer with a UUID
-  - [ ] Inserting a new header
   - [ ] Switching a header from TODO->NEXT->DONE->unlabeled->TODO
   - [ ] Wrap selection in quote or src block
   - [ ] Code block running

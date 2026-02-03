@@ -169,11 +169,11 @@ func toProtocolLocation(absPath string, pos org.Position) (protocol.Location, er
 		URI: protocol.DocumentUri(uri),
 		Range: protocol.Range{
 			Start: protocol.Position{
-				Line:      uint32(pos.StartLine - 1), // Convert 1-based to 0-based
+				Line:      uint32(pos.StartLine), // Already 0-indexed
 				Character: uint32(pos.StartColumn),
 			},
 			End: protocol.Position{
-				Line:      uint32(pos.EndLine - 1), // Convert 1-based to 0-based
+				Line:      uint32(pos.EndLine), // Already 0-indexed
 				Character: uint32(pos.EndColumn),
 			},
 		},
@@ -184,11 +184,11 @@ func toProtocolLocation(absPath string, pos org.Position) (protocol.Location, er
 func toProtocolRange(pos org.Position) protocol.Range {
 	return protocol.Range{
 		Start: protocol.Position{
-			Line:      uint32(pos.StartLine - 1),
+			Line:      uint32(pos.StartLine),
 			Character: uint32(pos.StartColumn),
 		},
 		End: protocol.Position{
-			Line:      uint32(pos.EndLine - 1),
+			Line:      uint32(pos.EndLine),
 			Character: uint32(pos.EndColumn),
 		},
 	}

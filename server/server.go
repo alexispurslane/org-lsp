@@ -33,6 +33,7 @@ func New() *server.Server {
 		SetTrace:                        setTrace,
 		WorkspaceDidChangeConfiguration: workspaceDidChangeConfiguration,
 		WorkspaceSymbol:                 workspaceSymbol,
+		WorkspaceExecuteCommand:         workspaceExecuteCommand,
 		TextDocumentDidOpen:             textDocumentDidOpen,
 		TextDocumentDidChange:           textDocumentDidChange,
 		TextDocumentDidClose:            textDocumentDidClose,
@@ -129,6 +130,9 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 			TriggerCharacters: []string{":", "_"},
 		},
 		CodeActionProvider: truePtr,
+		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+			Commands: []string{"org.executeCodeBlock"},
+		},
 	}
 
 	slog.Info("📤 Initialize response",
@@ -150,6 +154,51 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 // initialized handles the LSP initialized notification.
 func initialized(context *glsp.Context, params *protocol.InitializedParams) error {
 	return nil
+}
+
+// workspaceExecuteCommand handles workspace/executeCommand requests
+func workspaceExecuteCommand(context *glsp.Context, params *protocol.ExecuteCommandParams) (any, error) {
+	slog.Info("Executing command", "command", params.Command, "args", params.Arguments)
+
+	// Dispatch to the appropriate command handler
+	switch params.Command {
+	case "org.executeCodeBlock":
+		// Extract arguments: uri (string), line (int), column (int)
+		if len(params.Arguments) != 3 {
+			return nil, fmt.Errorf("org.executeCodeBlock requires 3 arguments: uri, line, column")
+		}
+
+		// Extract and cast the arguments
+		uri, ok := params.Arguments[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid uri argument")
+		}
+
+		line, ok := params.Arguments[1].(float64)
+		if !ok {
+			// Try as int64 for glsp/protocol handling
+			lineInt, okInt := params.Arguments[1].(int64)
+			if !okInt {
+				return nil, fmt.Errorf("invalid line argument")
+			}
+			line = float64(lineInt)
+		}
+
+		column, ok := params.Arguments[2].(float64)
+		if !ok {
+			// Try as int64 for glsp/protocol handling
+			colInt, okInt := params.Arguments[2].(int64)
+			if !okInt {
+				return nil, fmt.Errorf("invalid column argument")
+			}
+			column = float64(colInt)
+		}
+
+		// Call ExecuteCodeBlock with the extracted arguments
+		return ExecuteCodeBlock(protocol.DocumentUri(uri), int(line), int(column))
+	default:
+		return nil, fmt.Errorf("unknown command: %s", params.Command)
+	}
 }
 
 // shutdown handles the LSP shutdown request.

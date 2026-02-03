@@ -1633,7 +1633,242 @@ Items to buy.
 		t.Logf("✅ Workspace symbols successful! Found %d total symbols, %d project matches", len(allSymbols), len(projectSymbols))
 	})
 
-	// Test 10: Shutdown
+	// Test 10: Code Actions - Heading to List conversion
+	t.Run("CodeActionHeadingToList", func(t *testing.T) {
+		t.Log("Testing code actions for heading to list conversion...")
+
+		// Create test file with headings
+		testFile := "testdata/codeaction-headings.org"
+		absTestFile, _ := filepath.Abs(testFile)
+		testContent := `* First Heading
+Content for first heading.
+
+* Second Heading
+Content for second heading.
+** Nested Heading
+Nested content.
+`
+
+		err = os.WriteFile(testFile, []byte(testContent), 0644)
+		require.NoError(t, err, "Failed to create test file")
+		defer os.Remove(testFile)
+
+		// Open the document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absTestFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       testContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open test file: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		// Request code actions for heading range (lines 0-2, covering first heading)
+		codeActionParams := protocol.CodeActionParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absTestFile),
+			},
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 0},
+				End:   protocol.Position{Line: 2, Character: 0},
+			},
+			Context: protocol.CodeActionContext{},
+		}
+
+		var codeActions []protocol.CodeAction
+		err = jsonrpcConn.Call(ctx, "textDocument/codeAction", codeActionParams, &codeActions)
+		require.NoError(t, err, "CodeAction request failed")
+
+		// Should have at least 2 actions (ordered list and bullet list)
+		require.GreaterOrEqual(t, len(codeActions), 2, "Expected at least 2 code actions for headings")
+
+		// Find the heading conversion actions
+		var foundOrderedList, foundBulletList bool
+		for _, action := range codeActions {
+			if action.Title == "Convert headings to ordered list" {
+				foundOrderedList = true
+				require.NotNil(t, action.Kind, "Action should have a kind")
+				assert.Equal(t, protocol.CodeActionKindRefactorRewrite, *action.Kind)
+				require.NotNil(t, action.Edit, "Action should have an edit")
+				require.NotNil(t, action.Edit.Changes, "Edit should have changes")
+
+				// Verify the transformation produces correct output
+				changes := action.Edit.Changes
+				edit, ok := changes[protocol.DocumentUri("file://"+absTestFile)]
+				require.True(t, ok, "Expected changes for the document")
+				require.GreaterOrEqual(t, len(edit), 1, "Expected at least one text edit")
+				require.NotEmpty(t, edit[0].NewText, "Transformation should produce non-empty output")
+				assert.Equal(t, "1. First Heading\n   Content for first heading.\n\n", edit[0].NewText, "Expected ordered list transformation output")
+			}
+			if action.Title == "Convert headings to bullet list" {
+				foundBulletList = true
+				require.NotNil(t, action.Kind, "Action should have a kind")
+				assert.Equal(t, protocol.CodeActionKindRefactorRewrite, *action.Kind)
+
+				// Verify the transformation produces correct output
+				changes := action.Edit.Changes
+				edit, ok := changes[protocol.DocumentUri("file://"+absTestFile)]
+				require.True(t, ok, "Expected changes for the document")
+				require.GreaterOrEqual(t, len(edit), 1, "Expected at least one text edit")
+				require.NotEmpty(t, edit[0].NewText, "Expected non-empty transformation output")
+				assert.Equal(t, "- First Heading\n  Content for first heading.\n\n", edit[0].NewText, "Expected bullet list transformation output")
+			}
+		}
+
+		require.True(t, foundOrderedList, "Expected 'Convert headings to ordered list' action")
+		require.True(t, foundBulletList, "Expected 'Convert headings to bullet list' action")
+
+		t.Logf("✅ CodeAction heading to list conversion successful! Found %d actions", len(codeActions))
+	})
+
+	// Test 10b: Code Actions - List to Heading conversion
+	t.Run("CodeActionListToHeading", func(t *testing.T) {
+		t.Log("Testing code actions for list to heading conversion...")
+
+		// Create test file with a list (no heading, to avoid parser line position issues)
+		testFile := "testdata/codeaction-list.org"
+		absTestFile, _ := filepath.Abs(testFile)
+		testContent := `- First list item
+- Second list item
+  - Nested item
+`
+
+		err = os.WriteFile(testFile, []byte(testContent), 0644)
+		require.NoError(t, err, "Failed to create test file")
+		defer os.Remove(testFile)
+
+		// Open the document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absTestFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       testContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open test file: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		// Request code actions with cursor on the first list item
+		// Note: The parser reports all nodes at line 0, so we use line 0
+		codeActionParams := protocol.CodeActionParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absTestFile),
+			},
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 2, Character: 5},
+				End:   protocol.Position{Line: 2, Character: 5},
+			},
+			Context: protocol.CodeActionContext{},
+		}
+
+		var codeActions []protocol.CodeAction
+		err = jsonrpcConn.Call(ctx, "textDocument/codeAction", codeActionParams, &codeActions)
+		require.NoError(t, err, "CodeAction request failed")
+
+		// Should have at least 1 action (list to heading conversion)
+		require.GreaterOrEqual(t, len(codeActions), 1, "Expected at least 1 code action for list")
+
+		// Find the list conversion action
+		var foundListToHeading bool
+		for _, action := range codeActions {
+			if action.Title == "Convert list to headings" {
+				foundListToHeading = true
+				require.NotNil(t, action.Kind, "Action should have a kind")
+				assert.Equal(t, protocol.CodeActionKindRefactorRewrite, *action.Kind)
+				require.NotNil(t, action.Edit, "Action should have an edit")
+
+				// Verify the transformation produces correct output
+				changes := action.Edit.Changes
+				key := protocol.DocumentUri("file://" + absTestFile)
+				edit, ok := changes[key]
+				require.True(t, ok, "Expected changes for the document")
+				require.GreaterOrEqual(t, len(edit), 1, "Expected at least one text edit")
+				require.NotEmpty(t, edit[0].NewText, "Expected non-empty transformation output")
+				assert.Equal(t, "* Nested item\n", edit[0].NewText, "Expected list to heading transformation output")
+			}
+		}
+
+		require.True(t, foundListToHeading, "Expected 'Convert list to headings' action")
+
+		t.Logf("✅ CodeAction list to heading conversion successful! Found %d actions", len(codeActions))
+	})
+
+	// Test 10c: Code Actions - Code block evaluation
+	t.Run("CodeActionCodeBlockEval", func(t *testing.T) {
+		t.Log("Testing code actions for code block evaluation...")
+
+		// Create test file with a code block
+		testFile := "testdata/codeaction-codeblock.org"
+		absTestFile, _ := filepath.Abs(testFile)
+		testContent := `* Test Heading
+
+#+begin_src python
+print("hello")
+#+end_src
+`
+
+		err = os.WriteFile(testFile, []byte(testContent), 0644)
+		require.NoError(t, err, "Failed to create test file")
+		defer os.Remove(testFile)
+
+		// Open the document
+		didOpenParams := protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI:        protocol.DocumentUri("file://" + absTestFile),
+				LanguageID: "org",
+				Version:    1,
+				Text:       testContent,
+			},
+		}
+		if err := jsonrpcConn.Notify(ctx, "textDocument/didOpen", didOpenParams); err != nil {
+			t.Fatalf("Failed to open test file: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+
+		// Request code actions with cursor on the #+begin_src line (line 2 in 0-indexed)
+		codeActionParams := protocol.CodeActionParams{
+			TextDocument: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentUri("file://" + absTestFile),
+			},
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 2, Character: 10},
+				End:   protocol.Position{Line: 2, Character: 10},
+			},
+			Context: protocol.CodeActionContext{},
+		}
+
+		var codeActions []protocol.CodeAction
+		err = jsonrpcConn.Call(ctx, "textDocument/codeAction", codeActionParams, &codeActions)
+		require.NoError(t, err, "CodeAction request failed")
+
+		// Should have at least 1 action (evaluate code block)
+		require.GreaterOrEqual(t, len(codeActions), 1, "Expected at least 1 code action for code block")
+
+		// Find the code block evaluation action
+		var foundEvalAction bool
+		for _, action := range codeActions {
+			if action.Title == "Evaluate python code block" {
+				foundEvalAction = true
+				require.NotNil(t, action.Kind, "Action should have a kind")
+				assert.Equal(t, protocol.CodeActionKindQuickFix, *action.Kind)
+				require.NotNil(t, action.Command, "Action should have a command")
+				assert.Equal(t, "org.executeCodeBlock", action.Command.Command)
+			}
+		}
+
+		require.True(t, foundEvalAction, "Expected 'Evaluate python code block' action")
+
+		t.Logf("✅ CodeAction code block evaluation successful! Found %d actions", len(codeActions))
+	})
+
+	// Test 11: Shutdown
 	t.Run("Shutdown", func(t *testing.T) {
 		params := struct{}{}
 		var result any
