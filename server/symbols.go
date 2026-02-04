@@ -17,6 +17,8 @@ func (s *ServerImpl) DocumentSymbol(ctx context.Context, params *protocol.Docume
 		slog.Error("Server state is nil in documentSymbol")
 		return nil, nil
 	}
+	serverState.Mu.RLock()
+	defer serverState.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]
@@ -89,7 +91,7 @@ func (s *ServerImpl) Symbols(ctx context.Context, params *protocol.WorkspaceSymb
 
 			symbol := protocol.SymbolInformation{
 				Name: location.Title,
-				Kind: protocol.SymbolKindInterface, // Flat list, all same kind per SPEC
+				Kind: levelToSymbolKind(location.Level),
 				Location: protocol.Location{
 					URI: protocol.DocumentURI(uri),
 					Range: protocol.Range{

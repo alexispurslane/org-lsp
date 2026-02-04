@@ -141,6 +141,7 @@ func extractUUID(headline *org.Headline, uuidToPosition FileUUIDPositions) {
 				uuidToPosition[id] = UUIDInfo{
 					Position: normalizePosition(headline.Pos),
 					Title:    strings.TrimSpace(org.String(headline.Title...)),
+					Level:    headline.Lvl,
 				}
 			}
 		}

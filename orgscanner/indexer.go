@@ -104,6 +104,7 @@ func (s *OrgScanner) Process() error {
 					FilePath: parsed.Path,
 					Position: info.Position,
 					Title:    info.Title,
+					Level:    info.Level,
 				})
 			}
 

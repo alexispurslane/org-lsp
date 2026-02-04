@@ -24,6 +24,8 @@ func (s *ServerImpl) Definition(ctx context.Context, params *protocol.Definition
 		slog.Error("Server state is nil in definition")
 		return nil, nil
 	}
+	serverState.Mu.RLock()
+	defer serverState.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]
@@ -76,6 +78,8 @@ func (s *ServerImpl) Hover(ctx context.Context, params *protocol.HoverParams) (r
 		slog.Error("Server state is nil in hover")
 		return nil, nil
 	}
+	serverState.Mu.RLock()
+	defer serverState.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]
@@ -137,6 +141,8 @@ func (s *ServerImpl) References(ctx context.Context, params *protocol.ReferenceP
 	if serverState == nil {
 		return nil, nil
 	}
+	serverState.Mu.RLock()
+	defer serverState.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]

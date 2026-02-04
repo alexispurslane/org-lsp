@@ -88,6 +88,7 @@ func (s *ServerImpl) Initialize(ctx context.Context, params *protocol.Initialize
 		err := serverState.Scanner.Process()
 		if err != nil {
 			slog.Error("Failed to scan org files", "error", err)
+			return nil, err
 		} else {
 			fileCount := 0
 			serverState.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
@@ -181,6 +182,8 @@ func (s *ServerImpl) DidChange(ctx context.Context, params *protocol.DidChangeTe
 	if serverState == nil {
 		return nil
 	}
+	serverState.Mu.Lock()
+	defer serverState.Mu.Unlock()
 
 	uri := params.TextDocument.URI
 	slog.Info("Changing document", "uri", uri, "version", params.TextDocument.Version)
@@ -226,6 +229,8 @@ func (s *ServerImpl) DidClose(ctx context.Context, params *protocol.DidCloseText
 	if serverState == nil {
 		return nil
 	}
+	serverState.Mu.Lock()
+	defer serverState.Mu.Unlock()
 
 	uri := params.TextDocument.URI
 	slog.Info("Closing document", "uri", uri)
@@ -242,6 +247,8 @@ func (s *ServerImpl) DidOpen(ctx context.Context, params *protocol.DidOpenTextDo
 		slog.Error("Server state is nil in didOpen")
 		return nil
 	}
+	serverState.Mu.Lock()
+	defer serverState.Mu.Unlock()
 
 	uri := params.TextDocument.URI
 	slog.Info("Opening document", "uri", uri, "version", params.TextDocument.Version, "textLength", len(params.TextDocument.Text))

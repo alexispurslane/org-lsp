@@ -131,7 +131,7 @@ Items to buy.
 					for _, sym := range result {
 						foundNames[sym.Name] = true
 						if sym.Name == "Project Alpha" {
-							testza.AssertEqual(t, protocol.SymbolKindInterface, sym.Kind, "Workspace symbols should be Interface kind")
+							testza.AssertEqual(t, protocol.SymbolKindNamespace, sym.Kind, "Workspace symbols should be Interface kind")
 						}
 					}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -359,8 +360,15 @@ func (tc *LSPTestContext) resolveURI(uri string) protocol.DocumentURI {
 
 // uriToPath converts a file:// URI to a filesystem path
 func uriToPath(uri string) string {
-	if len(uri) > 7 && uri[:7] == "file://" {
-		return uri[7:]
+	u, _ := url.Parse(uri)
+	path := u.Path
+
+	// Handle Windows paths (remove leading slash if present and path starts with drive letter)
+	if len(path) > 2 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
 	}
-	return uri
+
+	// URL decode to handle spaces (%20) and other encoded characters
+	path, _ = url.QueryUnescape(path)
+	return path
 }

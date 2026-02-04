@@ -92,12 +92,13 @@ func scanFilesystem(root string) ([]*FileInfo, error) {
 			info, err := d.Info()
 			if err != nil {
 				slog.Error("Error getting file info", "path", path, "error", err)
-				return nil
+				return err
 			}
 
-			relPath := strings.TrimPrefix(path, root+string(filepath.Separator))
-			if relPath == path {
-				relPath = strings.TrimPrefix(path, root)
+			relPath, err := filepath.Rel(root, path)
+			if err != nil {
+				slog.Error("Error getting relative path", "path", path, "root", root, "error", err)
+				return err
 			}
 
 			files = append(files, &FileInfo{

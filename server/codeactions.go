@@ -16,6 +16,8 @@ func (s *ServerImpl) CodeAction(ctx context.Context, params *protocol.CodeAction
 	if serverState == nil {
 		return nil, nil
 	}
+	serverState.Mu.RLock()
+	defer serverState.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	doc, ok := serverState.OpenDocs[uri]
@@ -431,6 +433,8 @@ func ExecuteCodeBlock(uri protocol.DocumentURI, line, column int) (string, error
 		slog.Debug("Server state nil", "error", "server state not initialized")
 		return "", fmt.Errorf("server state not initialized")
 	}
+	serverState.Mu.RLock()
+	defer serverState.Mu.RUnlock()
 
 	doc, ok := serverState.OpenDocs[uri]
 	if !ok {

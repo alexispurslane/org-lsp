@@ -20,6 +20,8 @@ func (s *ServerImpl) Completion(ctx context.Context, params *protocol.Completion
 			Items:        []protocol.CompletionItem{},
 		}, nil
 	}
+	serverState.Mu.RLock()
+	defer serverState.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]

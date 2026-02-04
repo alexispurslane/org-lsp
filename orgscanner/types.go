@@ -15,6 +15,7 @@ type HeaderLocation struct {
 	FilePath string
 	Position org.Position
 	Title    string
+	Level    int
 }
 
 // UUID represents a globally unique org mode header identifier.
@@ -28,6 +29,7 @@ type HeaderIndex int
 type UUIDInfo struct {
 	Position org.Position
 	Title    string
+	Level    int
 }
 
 // FileUUIDPositions maps UUID strings to their info (position + title) within a file.

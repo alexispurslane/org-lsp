@@ -2,6 +2,10 @@
 
 set shell := ["sh", "-cu"]
 
+# Path to test colorizer binary
+
+testcolor_bin := "bin/testcolor"
+
 # Default recipe
 default:
     @just --list
@@ -29,33 +33,22 @@ server: build
 
 # Run the LSP server tests (optional filter argument)
 
+build-testcolor:
+    @go build -o {{ testcolor_bin }} ./cmd/testcolor 2>/dev/null || true
+
 # Runs with race detector and limited parallelism for thread-safety verification
-test filter="":
+test filter="": build-testcolor
     @echo "Running LSP server integration tests (with race detector)..."
-    ORG_LSP_LOG_LEVEL=INFO go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./...
+    @mkdir -p bin
+    ORG_LSP_LOG_LEVEL=INFO go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./... 2>&1 | {{ testcolor_bin }}
 
 # Run tests quietly (no INFO logs, optional filter argument)
 
 # Runs with race detector and limited parallelism for thread-safety verification
-test-quiet filter="":
+test-quiet filter="": build-testcolor
     @echo "Running tests quietly (with race detector)..."
-    ORG_LSP_LOG_LEVEL=ERROR go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./...
-
-# Run all Go tests
-
-# Runs with race detector and limited parallelism for thread-safety verification
-test-unit:
-    @echo "Running Go unit tests (with race detector)..."
-    go test -v -race -parallel=4 -timeout=60s -short ./...
-
-# Run all Go tests with coverage
-
-# Note: Race detector disabled for coverage to avoid performance overhead
-test-coverage:
-    @echo "Running Go tests with coverage..."
-    go test -v -parallel=4 -timeout=60s -coverprofile=coverage.out ./...
-    @go tool cover -html=coverage.out -o coverage.html
-    @echo "✓ Coverage report: coverage.html"
+    @mkdir -p bin
+    ORG_LSP_LOG_LEVEL=ERROR go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./... 2>&1 | {{ testcolor_bin }}
 
 # Format code
 fmt:

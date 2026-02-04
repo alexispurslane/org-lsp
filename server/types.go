@@ -1,6 +1,8 @@
 package server
 
 import (
+	"sync"
+
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
 	protocol "go.lsp.dev/protocol"
@@ -35,6 +37,7 @@ type CompletionContext struct {
 
 // State holds the global server state
 type State struct {
+	Mu          sync.RWMutex
 	OrgScanRoot string
 	Scanner     *orgscanner.OrgScanner
 	OpenDocs    map[protocol.DocumentURI]*org.Document
