@@ -28,24 +28,32 @@ server: build
     ./bin/org-lsp
 
 # Run the LSP server tests (optional filter argument)
+
+# Runs with race detector and limited parallelism for thread-safety verification
 test filter="":
-    @echo "Running LSP server integration tests..."
-    ORG_LSP_LOG_LEVEL=INFO go test -v -run="{{ filter }}" ./...
+    @echo "Running LSP server integration tests (with race detector)..."
+    ORG_LSP_LOG_LEVEL=INFO go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./...
 
 # Run tests quietly (no INFO logs, optional filter argument)
+
+# Runs with race detector and limited parallelism for thread-safety verification
 test-quiet filter="":
-    @echo "Running tests quietly..."
-    ORG_LSP_LOG_LEVEL=ERROR go test -v -run="{{ filter }}" ./...
+    @echo "Running tests quietly (with race detector)..."
+    ORG_LSP_LOG_LEVEL=ERROR go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./...
 
 # Run all Go tests
+
+# Runs with race detector and limited parallelism for thread-safety verification
 test-unit:
-    @echo "Running Go unit tests (excluding integration tests)..."
-    go test -v -short ./...
+    @echo "Running Go unit tests (with race detector)..."
+    go test -v -race -parallel=4 -timeout=60s -short ./...
 
 # Run all Go tests with coverage
+
+# Note: Race detector disabled for coverage to avoid performance overhead
 test-coverage:
     @echo "Running Go tests with coverage..."
-    go test -v -coverprofile=coverage.out ./...
+    go test -v -parallel=4 -timeout=60s -coverprofile=coverage.out ./...
     @go tool cover -html=coverage.out -o coverage.html
     @echo "✓ Coverage report: coverage.html"
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,17 +10,16 @@ import (
 
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
-	glsp "github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "go.lsp.dev/protocol"
 )
 
-func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+func (s *ServerImpl) Definition(ctx context.Context, params *protocol.DefinitionParams) (result []protocol.Location, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("PANIC in textDocumentDefinition", "recover", r)
+			slog.Error("PANIC in Definition", "recover", r)
 		}
 	}()
-	slog.Debug("textDocument/definition called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
+	slog.Debug("Definition called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
 	if serverState == nil {
 		slog.Error("Server state is nil in definition")
 		return nil, nil
@@ -43,7 +43,6 @@ func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionPa
 
 	var filePath string
 	var pos org.Position
-	var err error
 
 	switch linkNode.Protocol {
 	case "file":
@@ -63,15 +62,130 @@ func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionPa
 	}
 
 	slog.Debug("Link resolved", "filePath", filePath, "line", pos.StartLine)
-	return toProtocolLocation(filePath, pos)
+	location, err := toProtocolLocation(filePath, pos)
+	if err != nil {
+		slog.Error("Failed to convert to protocol location", "error", err)
+		return nil, err
+	}
+	return []protocol.Location{location}, nil
+}
+
+func (s *ServerImpl) Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error) {
+	slog.Debug("Hover handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
+	if serverState == nil {
+		slog.Error("Server state is nil in hover")
+		return nil, nil
+	}
+
+	uri := params.TextDocument.URI
+	doc, found := serverState.OpenDocs[uri]
+	if !found {
+		slog.Debug("Document not found in OpenDocs for hover", "uri", uri, "availableDocs", len(serverState.OpenDocs))
+		return nil, nil
+	}
+
+	// Find link at cursor position
+	linkNode, foundLink := findNodeAtPosition[org.RegularLink](doc, params.Position)
+	if !foundLink {
+		return nil, nil
+	}
+
+	// Resolve link to get target position
+	var filePath string
+	var targetPos org.Position
+	var resolveErr error
+
+	switch linkNode.Protocol {
+	case "file":
+		filePath, targetPos, resolveErr = resolveFileLink(uri, linkNode.URL)
+	case "id":
+		filePath, targetPos, resolveErr = resolveIDLink(uri, linkNode.URL)
+	default:
+		return nil, nil
+	}
+
+	if resolveErr != nil {
+		return nil, nil
+	}
+
+	slog.Info("Resolved link absolute path and position", "path", filePath, "pos", targetPos)
+
+	// Build hover content
+	content := fmt.Sprintf("**%s Link**\n\nTarget: `%s`", strings.ToUpper(linkNode.Protocol), filepath.Base(filePath))
+
+	// Extract context lines from target document
+	contextLines := extractContextLines(filePath, targetPos)
+	slog.Info("Context extraction result", "hasContent", contextLines != "", "length", len(contextLines))
+	if contextLines != "" {
+		content += fmt.Sprintf("\n\n```org\n%s\n```", contextLines)
+	}
+
+	// Calculate hover range from link node
+	hoverRange := toProtocolRange(linkNode.Pos)
+	hoverRangePtr := &hoverRange
+
+	return &protocol.Hover{
+		Contents: protocol.MarkupContent{
+			Kind:  "markdown",
+			Value: content,
+		},
+		Range: hoverRangePtr,
+	}, nil
+}
+
+func (s *ServerImpl) References(ctx context.Context, params *protocol.ReferenceParams) (result []protocol.Location, err error) {
+	if serverState == nil {
+		return nil, nil
+	}
+
+	uri := params.TextDocument.URI
+	doc, found := serverState.OpenDocs[uri]
+	if !found {
+		slog.Debug("Document not in OpenDocs", "uri", uri)
+		return nil, nil
+	}
+
+	// First check if cursor is on an id: link (Enhanced References feature)
+	link, foundLink := findNodeAtPosition[org.RegularLink](doc, params.Position)
+	if foundLink {
+		// Check if this is an id: link
+		if linkUUID, ok := strings.CutPrefix(link.URL, "id:"); ok && linkUUID != "" {
+			slog.Debug("Found id: link at cursor, finding references", "uuid", linkUUID)
+			locations, err := findIDReferences(linkUUID)
+			if err != nil {
+				return nil, err
+			}
+			return locations, nil
+		}
+	}
+
+	// Fall back to headline detection
+	headline, foundHeadline := findNodeAtPosition[org.Headline](doc, params.Position)
+	if !foundHeadline {
+		return nil, nil
+	}
+
+	// Extract UUID from headline properties
+	for _, prop := range headline.Properties.Properties {
+		if prop[0] == "ID" && prop[1] != "" {
+			uuid := prop[1]
+			locations, err := findIDReferences(uuid)
+			if err != nil {
+				return nil, err
+			}
+			return locations, nil
+		}
+	}
+
+	return nil, nil
 }
 
 // resolveFileLink resolves a file: link to an absolute path and returns the target position
-func resolveFileLink(currentURI protocol.DocumentUri, linkURL string) (string, org.Position, error) {
+func resolveFileLink(currentURI protocol.DocumentURI, linkURL string) (string, org.Position, error) {
 	slog.Debug("Resolving file link", "currentURI", currentURI, "linkURL", linkURL)
 
 	// Convert URI to filesystem path
-	currentPath := uriToPath(currentURI)
+	currentPath := uriToPath(string(currentURI))
 
 	// Remove the org-mode file: prefix
 	linkURL = strings.TrimPrefix(linkURL, "file:")
@@ -111,7 +225,7 @@ func resolveFileLink(currentURI protocol.DocumentUri, linkURL string) (string, o
 }
 
 // resolveIDLink resolves an id: link via UUID index and returns the target position
-func resolveIDLink(currentURI protocol.DocumentUri, uuid string) (string, org.Position, error) {
+func resolveIDLink(currentURI protocol.DocumentURI, uuid string) (string, org.Position, error) {
 	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
 		return "", org.Position{}, fmt.Errorf("no processed files")
 	}
@@ -143,70 +257,6 @@ func resolveIDLink(currentURI protocol.DocumentUri, uuid string) (string, org.Po
 	slog.Debug("Resolved ID link path", "relativePath", location.FilePath, "absPath", absPath, "orgScanRoot", serverState.OrgScanRoot)
 
 	return absPath, location.Position, nil
-}
-
-// textDocumentHover handles the LSP textDocument/hover request
-func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
-	slog.Debug("textDocument/hover handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
-	if serverState == nil {
-		slog.Error("Server state is nil in hover")
-		return nil, nil
-	}
-
-	uri := params.TextDocument.URI
-	doc, found := serverState.OpenDocs[uri]
-	if !found {
-		slog.Debug("Document not found in OpenDocs for hover", "uri", uri, "availableDocs", len(serverState.OpenDocs))
-		return nil, nil
-	}
-
-	// Find link at cursor position
-	linkNode, foundLink := findNodeAtPosition[org.RegularLink](doc, params.Position)
-	if !foundLink {
-		return nil, nil
-	}
-
-	// Resolve link to get target position
-	var filePath string
-	var targetPos org.Position
-	var err error
-
-	switch linkNode.Protocol {
-	case "file":
-		filePath, targetPos, err = resolveFileLink(uri, linkNode.URL)
-	case "id":
-		filePath, targetPos, err = resolveIDLink(uri, linkNode.URL)
-	default:
-		return nil, nil
-	}
-
-	if err != nil {
-		return nil, nil
-	}
-
-	slog.Info("Resolved link absolute path and position", "path", filePath, "pos", targetPos)
-
-	// Build hover content
-	content := fmt.Sprintf("**%s Link**\n\nTarget: `%s`", strings.ToUpper(linkNode.Protocol), filepath.Base(filePath))
-
-	// Extract context lines from target document
-	contextLines := extractContextLines(filePath, targetPos)
-	slog.Info("Context extraction result", "hasContent", contextLines != "", "length", len(contextLines))
-	if contextLines != "" {
-		content += fmt.Sprintf("\n\n```org\n%s\n```", contextLines)
-	}
-
-	// Calculate hover range from link node
-	hoverRange := toProtocolRange(linkNode.Pos)
-	hoverRangePtr := &hoverRange
-
-	return &protocol.Hover{
-		Contents: protocol.MarkupContent{
-			Kind:  protocol.MarkupKindMarkdown,
-			Value: content,
-		},
-		Range: hoverRangePtr,
-	}, nil
 }
 
 // extractContextLines extracts ±3 lines of context around the target position
@@ -249,45 +299,6 @@ func joinLines(lines []string, start, end int) string {
 		context.WriteString(lines[i])
 	}
 	return context.String()
-}
-
-func textDocumentReferences(context *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
-	if serverState == nil {
-		return nil, nil
-	}
-
-	uri := params.TextDocument.URI
-	doc, found := serverState.OpenDocs[uri]
-	if !found {
-		slog.Debug("Document not in OpenDocs", "uri", uri)
-		return nil, nil
-	}
-
-	// First check if cursor is on an id: link (Enhanced References feature)
-	link, foundLink := findNodeAtPosition[org.RegularLink](doc, params.Position)
-	if foundLink {
-		// Check if this is an id: link
-		if linkUUID, ok := strings.CutPrefix(link.URL, "id:"); ok && linkUUID != "" {
-			slog.Debug("Found id: link at cursor, finding references", "uuid", linkUUID)
-			return findIDReferences(linkUUID)
-		}
-	}
-
-	// Fall back to headline detection
-	headline, foundHeadline := findNodeAtPosition[org.Headline](doc, params.Position)
-	if !foundHeadline {
-		return nil, nil
-	}
-
-	// Extract UUID from headline properties
-	for _, prop := range headline.Properties.Properties {
-		if prop[0] == "ID" && prop[1] != "" {
-			uuid := prop[1]
-			return findIDReferences(uuid)
-		}
-	}
-
-	return nil, nil
 }
 
 func findIDReferences(targetUUID string) ([]protocol.Location, error) {

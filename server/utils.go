@@ -6,7 +6,7 @@ import (
 
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "go.lsp.dev/protocol"
 )
 
 // countUUIDs returns the total number of UUIDs in the ProcessedFiles.
@@ -166,7 +166,7 @@ func toProtocolLocation(absPath string, pos org.Position) (protocol.Location, er
 
 	// Create location with the link's range
 	return protocol.Location{
-		URI: protocol.DocumentUri(uri),
+		URI: protocol.DocumentURI(uri),
 		Range: protocol.Range{
 			Start: protocol.Position{
 				Line:      uint32(pos.StartLine), // Already 0-indexed

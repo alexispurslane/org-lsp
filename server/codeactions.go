@@ -2,18 +2,17 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os/exec"
 	"strings"
 
 	"github.com/alexispurslane/go-org/org"
-	glsp "github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "go.lsp.dev/protocol"
 )
 
-// textDocumentCodeAction provides code actions for org-mode transformations.
-func textDocumentCodeAction(context *glsp.Context, params *protocol.CodeActionParams) (any, error) {
+func (s *ServerImpl) CodeAction(ctx context.Context, params *protocol.CodeActionParams) (result []protocol.CodeAction, err error) {
 	if serverState == nil {
 		return nil, nil
 	}
@@ -69,8 +68,8 @@ func textDocumentCodeAction(context *glsp.Context, params *protocol.CodeActionPa
 }
 
 // getHeadingConversionActions returns actions to convert headings to lists.
-func getHeadingConversionActions(nodes []org.Node, uri protocol.DocumentUri) []protocol.CodeAction {
-	kindRefactor := protocol.CodeActionKindRefactorRewrite
+func getHeadingConversionActions(nodes []org.Node, uri protocol.DocumentURI) []protocol.CodeAction {
+	kindRefactor := protocol.RefactorRewrite
 
 	// Build text edits for all selected headings
 	var orderedListEdits []protocol.TextEdit
@@ -79,13 +78,13 @@ func getHeadingConversionActions(nodes []org.Node, uri protocol.DocumentUri) []p
 	// Get the full subtree range for this heading
 	startPos := nodes[0].Position()
 	start := protocol.Position{
-		Line:      protocol.UInteger(startPos.StartLine),
-		Character: protocol.UInteger(startPos.StartColumn),
+		Line:      uint32(startPos.StartLine),
+		Character: uint32(startPos.StartColumn),
 	}
 	endPos := nodes[len(nodes)-1].Position()
 	end := protocol.Position{
-		Line:      protocol.UInteger(endPos.EndLine),
-		Character: protocol.UInteger(endPos.EndColumn),
+		Line:      uint32(endPos.EndLine),
+		Character: uint32(endPos.EndColumn),
 	}
 	subtreeRange := protocol.Range{
 		Start: start,
@@ -114,20 +113,20 @@ func getHeadingConversionActions(nodes []org.Node, uri protocol.DocumentUri) []p
 	return []protocol.CodeAction{
 		{
 			Title:       "Convert headings to ordered list",
-			Kind:        &kindRefactor,
+			Kind:        kindRefactor,
 			Diagnostics: nil,
 			Edit: &protocol.WorkspaceEdit{
-				Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
 					uri: orderedListEdits,
 				},
 			},
 		},
 		{
 			Title:       "Convert headings to bullet list",
-			Kind:        &kindRefactor,
+			Kind:        kindRefactor,
 			Diagnostics: nil,
 			Edit: &protocol.WorkspaceEdit{
-				Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
 					uri: bulletListEdits,
 				},
 			},
@@ -136,14 +135,14 @@ func getHeadingConversionActions(nodes []org.Node, uri protocol.DocumentUri) []p
 }
 
 // getListConversionAction returns an action to convert a list to headings.
-func getListConversionAction(list org.List, doc *org.Document, uri protocol.DocumentUri, selectionRange protocol.Range) protocol.CodeAction {
-	kindRefactor := protocol.CodeActionKindRefactorRewrite
+func getListConversionAction(list org.List, doc *org.Document, uri protocol.DocumentURI, selectionRange protocol.Range) protocol.CodeAction {
+	kindRefactor := protocol.RefactorRewrite
 
 	// Find the heading that contains this list to determine appropriate level
 	listPos := list.Position()
 	startLevel := 1 // Default to level 1 if no parent heading found
 	if parentHeading, found := findNodeAtPosition[org.Headline](doc, protocol.Position{
-		Line:      protocol.UInteger(listPos.StartLine), // Convert 1-based to 0-based
+		Line:      uint32(listPos.StartLine), // Convert 1-based to 0-based
 		Character: 0,
 	}); found {
 		startLevel = parentHeading.Lvl + 1
@@ -156,11 +155,11 @@ func getListConversionAction(list org.List, doc *org.Document, uri protocol.Docu
 	// Build text edit for the list
 	editRange := protocol.Range{
 		Start: protocol.Position{
-			Line:      protocol.UInteger(listPos.StartLine),
+			Line:      uint32(listPos.StartLine),
 			Character: 0,
 		},
 		End: protocol.Position{
-			Line:      protocol.UInteger(listPos.EndLine),
+			Line:      uint32(listPos.EndLine),
 			Character: 0,
 		},
 	}
@@ -174,10 +173,10 @@ func getListConversionAction(list org.List, doc *org.Document, uri protocol.Docu
 
 	return protocol.CodeAction{
 		Title:       "Convert list to headings",
-		Kind:        &kindRefactor,
+		Kind:        kindRefactor,
 		Diagnostics: nil,
 		Edit: &protocol.WorkspaceEdit{
-			Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
 				uri: {
 					{
 						Range:   editRange,
@@ -402,30 +401,30 @@ func listToHeadingSubtree(list org.List, startLevel int) []org.Node {
 }
 
 // getCodeBlockAction returns action to evaluate a code block.
-func getCodeBlockAction(block org.Block, uri protocol.DocumentUri) protocol.CodeAction {
+func getCodeBlockAction(block org.Block, uri protocol.DocumentURI) protocol.CodeAction {
 	lang := "unknown"
 	if len(block.Parameters) > 0 {
 		lang = block.Parameters[0]
 	}
 	title := fmt.Sprintf("Evaluate %s code block", lang)
 
-	kindQuickFix := protocol.CodeActionKindQuickFix
+	kindQuickFix := protocol.QuickFix
 
 	return protocol.CodeAction{
 		Title:       title,
-		Kind:        &kindQuickFix,
+		Kind:        kindQuickFix,
 		Diagnostics: nil,
 		Command: &protocol.Command{
 			Title:     title,
 			Command:   "org.executeCodeBlock",
-			Arguments: []any{uri, block.Pos.StartLine, block.Pos.StartColumn},
+			Arguments: []any{string(uri), block.Pos.StartLine, block.Pos.StartColumn},
 		},
 	}
 }
 
 // ExecuteCodeBlock executes the code in a src block and returns the result.
 // This is called via workspace/executeCommand.
-func ExecuteCodeBlock(uri protocol.DocumentUri, line, column int) (string, error) {
+func ExecuteCodeBlock(uri protocol.DocumentURI, line, column int) (string, error) {
 	slog.Debug("Executing code block", "uri", uri, "line", line, "column", column)
 
 	if serverState == nil {

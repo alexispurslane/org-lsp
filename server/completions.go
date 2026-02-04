@@ -1,34 +1,40 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"path/filepath"
 	"strings"
 
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
-	glsp "github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "go.lsp.dev/protocol"
 )
 
-func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionParams) (any, error) {
-	slog.Debug("textDocument/completion handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
+func (s *ServerImpl) Completion(ctx context.Context, params *protocol.CompletionParams) (result *protocol.CompletionList, err error) {
+	slog.Debug("Completion handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
 	if serverState == nil {
 		slog.Error("Server state is nil in completion")
-		return nil, nil
+		return &protocol.CompletionList{
+			IsIncomplete: false,
+			Items:        []protocol.CompletionItem{},
+		}, nil
 	}
 
 	uri := params.TextDocument.URI
 	doc, found := serverState.OpenDocs[uri]
 	if !found {
 		slog.Debug("Document not in OpenDocs", "uri", uri)
-		return nil, nil
+		return &protocol.CompletionList{
+			IsIncomplete: false,
+			Items:        []protocol.CompletionItem{},
+		}, nil
 	}
 
 	// Check completion context - are we in "id:" or ":tag:" completion?
-	ctx := detectCompletionContext(doc, uri, params.Position)
+	completionCtx := detectCompletionContext(doc, protocol.DocumentURI(uri), params.Position)
 
-	if ctx.Type == "" {
+	if completionCtx.Type == "" {
 		return &protocol.CompletionList{
 			IsIncomplete: false,
 			Items:        []protocol.CompletionItem{},
@@ -37,17 +43,17 @@ func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionPa
 
 	items := []protocol.CompletionItem{}
 
-	switch ctx.Type {
+	switch completionCtx.Type {
 	case ContextTypeID:
-		items = completeIDs(ctx)
+		items = completeIDs(completionCtx)
 	case ContextTypeTag:
-		items = completeTags(doc, params.Position, ctx)
+		items = completeTags(doc, params.Position, completionCtx)
 	case ContextTypeFile:
-		items = completeFiles(ctx)
+		items = completeFiles(completionCtx)
 	case ContextTypeBlock:
-		items = completeBlockTypes(ctx, params.Position)
+		items = completeBlockTypes(completionCtx, params.Position)
 	case ContextTypeExport:
-		items = completeExportTypes(ctx, params.Position)
+		items = completeExportTypes(completionCtx, params.Position)
 	default:
 		return nil, nil
 	}
@@ -58,7 +64,7 @@ func textDocumentCompletion(glspCtx *glsp.Context, params *protocol.CompletionPa
 	}, nil
 }
 
-func detectCompletionContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
+func detectCompletionContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
 	// First check if we're in a tag context (on headline line)
 	headline, found := findNodeAtPosition[org.Headline](doc, pos)
 	if found {
@@ -92,7 +98,7 @@ func detectCompletionContext(doc *org.Document, uri protocol.DocumentUri, pos pr
 }
 
 // detectPrefixContext is a generic helper that checks if cursor is after a specific prefix
-func detectPrefixContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position, prefix string, ctxType CompletionContextType, checkClosingBrackets bool) CompletionContext {
+func detectPrefixContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position, prefix string, ctxType CompletionContextType, checkClosingBrackets bool) CompletionContext {
 	ctx := CompletionContext{Type: ContextTypeNone}
 
 	// Get raw content to check text before cursor
@@ -140,22 +146,22 @@ func detectPrefixContext(doc *org.Document, uri protocol.DocumentUri, pos protoc
 }
 
 // detectBlockContext checks if cursor is in a block type completion context (after "#+begin_")
-func detectBlockContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
+func detectBlockContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
 	return detectPrefixContext(doc, uri, pos, "#+begin_", ContextTypeBlock, false)
 }
 
 // detectExportBlockContext checks if cursor is in an export block completion context (after "#+begin_export_")
-func detectExportBlockContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
+func detectExportBlockContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
 	return detectPrefixContext(doc, uri, pos, "#+begin_export_", ContextTypeExport, false)
 }
 
 // detectFileContext checks if cursor is in a file link completion context (after "[[file:")
-func detectFileContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
+func detectFileContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
 	return detectPrefixContext(doc, uri, pos, "[[file:", ContextTypeFile, true)
 }
 
 // detectIDContext checks if cursor is in an ID completion context (after "[[id:")
-func detectIDContext(doc *org.Document, uri protocol.DocumentUri, pos protocol.Position) CompletionContext {
+func detectIDContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
 	ctx := detectPrefixContext(doc, uri, pos, "[[id:", ContextTypeID, true)
 	// ID context uses lowercase filter for case-insensitive matching
 	ctx.FilterPrefix = strings.ToLower(ctx.FilterPrefix)
@@ -223,11 +229,11 @@ func completeIDs(ctx CompletionContext) []protocol.CompletionItem {
 		// Create completion item with title as label, UUID as insert text
 		item := protocol.CompletionItem{
 			Label:      title, // User sees heading title
-			Kind:       ptrTo(protocol.CompletionItemKindReference),
-			Detail:     strPtr("ID Link"), // Type indicator
-			InsertText: &insertText,       // Full UUID inserted (+ closing brackets)
+			Kind:       protocol.CompletionItemKindReference,
+			Detail:     "ID Link",  // Type indicator
+			InsertText: insertText, // Full UUID inserted (+ closing brackets)
 			Documentation: protocol.MarkupContent{
-				Kind:  protocol.MarkupKindMarkdown,
+				Kind:  "markdown",
 				Value: preview,
 			},
 		}
@@ -302,9 +308,9 @@ func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContex
 
 			item := protocol.CompletionItem{
 				Label:      tag,
-				Kind:       ptrTo(protocol.CompletionItemKindProperty),
-				Detail:     strPtr("Tag"),
-				InsertText: strPtr(tag + ":"),
+				Kind:       protocol.CompletionItemKindProperty,
+				Detail:     "Tag",
+				InsertText: tag + ":",
 			}
 
 			items = append(items, item)
@@ -339,8 +345,8 @@ func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
 		// Create completion item
 		item := protocol.CompletionItem{
 			Label:  fileInfo.Path,
-			Kind:   ptrTo(protocol.CompletionItemKindFile),
-			Detail: strPtr("File"),
+			Kind:   protocol.CompletionItemKindFile,
+			Detail: "File",
 		}
 
 		// Insert text is just the path, then add closing bracket if needed
@@ -348,7 +354,7 @@ func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
 		if ctx.NeedsClosingBracket {
 			insertText = insertText + "]]"
 		}
-		item.InsertText = strPtr(insertText)
+		item.InsertText = insertText
 
 		items = append(items, item)
 		return true // continue iteration
@@ -379,8 +385,8 @@ func completeBlockTypes(ctx CompletionContext, pos protocol.Position) []protocol
 		fullLabel := "#+begin_" + blockType
 		item := protocol.CompletionItem{
 			Label:  fullLabel,
-			Kind:   ptrTo(protocol.CompletionItemKindKeyword),
-			Detail: strPtr("Block type"),
+			Kind:   protocol.CompletionItemKindKeyword,
+			Detail: "Block type",
 		}
 
 		// Use TextEdit to replace the entire "#+begin_XXX" prefix
@@ -389,7 +395,7 @@ func completeBlockTypes(ctx CompletionContext, pos protocol.Position) []protocol
 			Range: protocol.Range{
 				Start: protocol.Position{
 					Line:      pos.Line,
-					Character: protocol.UInteger(startChar),
+					Character: uint32(startChar),
 				},
 				End: protocol.Position{
 					Line:      pos.Line,
@@ -427,8 +433,8 @@ func completeExportTypes(ctx CompletionContext, pos protocol.Position) []protoco
 		fullLabel := "#+begin_export_" + exportType
 		item := protocol.CompletionItem{
 			Label:  fullLabel,
-			Kind:   ptrTo(protocol.CompletionItemKindKeyword),
-			Detail: strPtr("Export format"),
+			Kind:   protocol.CompletionItemKindKeyword,
+			Detail: "Export format",
 		}
 
 		// Use TextEdit to replace the entire "#+begin_export_XXX" prefix
@@ -437,7 +443,7 @@ func completeExportTypes(ctx CompletionContext, pos protocol.Position) []protoco
 			Range: protocol.Range{
 				Start: protocol.Position{
 					Line:      pos.Line,
-					Character: protocol.UInteger(startChar),
+					Character: uint32(startChar),
 				},
 				End: protocol.Position{
 					Line:      pos.Line,

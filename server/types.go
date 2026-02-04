@@ -3,7 +3,7 @@ package server
 import (
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "go.lsp.dev/protocol"
 )
 
 // LinkNode represents a link with its metadata
@@ -37,7 +37,7 @@ type CompletionContext struct {
 type State struct {
 	OrgScanRoot string
 	Scanner     *orgscanner.OrgScanner
-	OpenDocs    map[protocol.DocumentUri]*org.Document
-	RawContent  map[protocol.DocumentUri]string
-	DocVersions map[protocol.DocumentUri]int32
+	OpenDocs    map[protocol.DocumentURI]*org.Document
+	RawContent  map[protocol.DocumentURI]string
+	DocVersions map[protocol.DocumentURI]int32
 }

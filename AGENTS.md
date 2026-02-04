@@ -11,9 +11,9 @@ org-lsp is a minimal LSP server for org-mode files focused on navigation and lin
 ## Technology Stack
 
 ### Core Dependencies
-- **LSP Framework**: `github.com/tliron/glsp` v0.2.2 - Protocol-3.16 compliant LSP server framework
+- **LSP Framework**: `go.lsp.dev/protocol` - LSP protocol types and server framework
 - **Org Parser**: `github.com/alexispurslane/go-org` v1.9.1 - Org-mode AST parsing (fork of `niklasfasching` version)
-- **Testing**: `github.com/stretchr/testify` v1.11.1 - Rich assertions and test helpers
+- **Testing**: `github.com/MarvinJWendt/testza` v0.5.2 - Modern assertions with colored diffs
 - **Logging**: `log/slog` - Structured logging (Go 1.21+)
 
 ### Build System
@@ -26,13 +26,18 @@ org-lsp is a minimal LSP server for org-mode files focused on navigation and lin
 org-lsp/
 ├── cmd/server/main.go          # Entry point, minimal
 ├── server/                     # LSP server implementation
-│   ├── server.go              # Core handler logic
-│   └── integration_test.go    # Integration tests (testify-based)
+│   └── server.go              # Core handler logic
+├── integration/               # Integration tests (NEW - testza-based)
+│   ├── lsp_test_context.go   # LSPTestContext and helpers
+│   ├── gherkin.go            # Given/When/Then helpers
+│   └── lsp_test.go           # Integration tests
 ├── orgscanner/                # File scanning & indexing
 │   ├── scanner.go            # File discovery
 │   ├── parser.go             # Org parsing logic
 │   ├── types.go              # Domain types
 │   └── orgscanner.go         # Main processing
+├── lspstream/                 # LSP message streaming
+│   └── stream.go             # LargeBufferStream implementation
 ├── SPEC.md                   # Feature specification
 ├── AGENTS.md                # This file
 └── justfile                 # Build automation
@@ -77,8 +82,8 @@ Link resolution is refactored to separate concerns:
 
 ## Testing Guidelines
 
-### Testify Usage
-Always use testify assertions for clearer test output:
+### Testza Usage
+Always use testza assertions for clearer test output with colored diffs:
 ```go
 // ❌ Avoid
 if result == nil {
@@ -86,35 +91,82 @@ if result == nil {
 }
 
 // ✅ Use
-require.NotNil(t, result, "Expected non-nil result")
-assert.Equal(t, expected, actual, "Values should match")
+testza.AssertNotNil(t, result, "Expected non-nil result")
+testza.AssertEqual(t, expected, actual, "Values should match")
 ```
 
-**Convention**:
-- Use `require` for conditions that should stop the test
-- Use `assert` for non-critical checks that can continue
+### LSPTestContext Pattern
+Integration tests use `LSPTestContext` for isolated test environments:
 
-### Test Structure
-Integration tests use real TCP connections:
 ```go
-// Create server
-srv := ourserver.New()
-go srv.RunTCP(addr)
+func TestFileLinkDefinition(t *testing.T) {
+    Given("source and target files", t,
+        func(t *testing.T) *LSPTestContext {
+            tc := NewTestContext(t)
+            tc.GivenFile("target.org", "* Target\nContent").
+               GivenFile("source.org", "* Source\n[[file:target.org][link]]").
+               GivenOpenFile("source.org")
+            return tc
+        },
+        func(t *testing.T, tc *LSPTestContext) {
+            params := protocol.DefinitionParams{...}
+            
+            When(t, tc, "requesting definition", "textDocument/definition", params, 
+                func(t *testing.T, locs []protocol.Location) {
+                    Then("returns target location", t, func(t *testing.T) {
+                        testza.AssertEqual(t, 1, len(locs))
+                        testza.AssertTrue(t, strings.Contains(string(locs[0].URI), "target.org"))
+                    })
+                })
+        },
+    )
+}
+```
 
-// Connect with retry
-conn, err := net.DialTimeout("tcp", addr, timeout)
+**Key Features:**
+- Each test gets its own temp directory and server instance
+- `Given*` helpers are chainable for concise setup
+- `When[T]` handles LSP calls with type-safe results
+- Tests run in parallel by default (via `t.Parallel()` in `Given`)
 
-// JSON-RPC communication
-jsonrpcConn := jsonrpc2.NewConn(...)
+### LSPTestContext Methods
+
+**Setup (chainable):**
+- `GivenFile(path, content)` - Creates a file in temp directory
+- `GivenOpenFile(uri)` - Sends `textDocument/didOpen` notification
+- `GivenSaveFile(uri)` - Sends `textDocument/didSave` notification
+
+**Execution:**
+- `When[T](t, tc, description, method, params, handler)` - Makes LSP call and passes result to handler
+
+**Cleanup:**
+- `Shutdown()` - Automatically called via `defer` in `Given`
+
+### Gherkin Helpers
+Structure tests with Given/When/Then for readable output:
+```go
+Given("context", t, setupFunc, testFunc)
+When(t, tc, "action", method, params, handler)  // Included in lsp_test_context.go
+Then("expected result", t, assertionFunc)
+```
+
+Output appears as:
+```
+=== RUN   TestName/given_context
+=== RUN   TestName/given_context/when_action
+=== RUN   TestName/given_context/when_action/then_expected_result
 ```
 
 ### Test Helpers in justfile
 ```bash
-just test                    # Run all tests (with INFO logs)
-just test-quiet             # Run tests (ERROR logs only)
-just test <pattern>         # Run specific test pattern
-just test-quiet <pattern>   # Run specific test quietly
+just test                    # Run all tests (with INFO logs, race detector ON)
+just test-quiet             # Run tests (ERROR logs only, race detector ON)
+just test <pattern>         # Run specific test pattern (race detector ON)
+just test-quiet <pattern>   # Run specific test quietly (race detector ON)
 ```
+
+**Important:** Always use `just` for testing, never `go test` directly.
+
 
 ## Common Pitfalls
 
@@ -237,12 +289,90 @@ just test
 just test-coverage
 ```
 
-### 2. Adding Features
-1. Update SPEC.md with feature specification
-2. Add tests first (testify-based)
-3. Implement feature following patterns above
-4. Ensure proper error handling and logging
-5. Run full test suite locally
+### 2. Adding Features (Type-First BDD Workflow)
+
+When the user proposes a new feature, follow this workflow where **executable tests** specify behavior and **types + doc comments** specify technical design:
+
+#### Step 1: Agree on Behavior
+
+Write natural language Gherkin scenarios and iterate with the user:
+
+```gherkin
+Given a source file with a file link
+  And a target file exists
+  When I request definition at the link position
+    Then it should return the target file location
+```
+
+#### Step 2: Executable Specification
+
+Translate to BDD tests in `integration/<featurename>_test.go` - this is the **living behavioral spec**:
+
+```go
+func TestFileLinkDefinition(t *testing.T) {
+    Given("a source file with a file link", t, setupFunc, func(t *testing.T, tc *LSPTestContext) {
+        When(t, tc, "requesting definition at link position", "textDocument/definition", params,
+            func(t *testing.T, locs []protocol.Location) {
+                Then("returns target file location", t, func(t *testing.T) {
+                    testza.AssertEqual(t, 1, len(locs))
+                })
+            })
+    })
+}
+```
+
+Each top level Test* function should correspond to the collection of Gherkin "Given" scenarios that describe a total feature. Put each such function in its own file.
+
+Run the test to confirm it fails (red): `just test TestFileLinkDefinition`
+
+**Thread-Safety Verification Note:** All `just test*` commands run with:
+- `-race` flag enabled (detects data races at runtime)
+- `-parallel=4` (limited parallelism to catch concurrency bugs)
+- `-timeout=60s` (catches deadlocks/hangs)
+
+This means your tests automatically verify thread-safety! If you introduce a data race or deadlock, the tests will fail with a detailed report. Keep tests deterministic and avoid shared mutable state between parallel tests.
+
+#### Step 3: Technical Specification (Type-First)
+
+Define data types and function signatures with doc comments. The **types are the spec**, the documentation comments define specific algorithms and semantics:
+
+```go
+// IDLinkResolver finds target headings by UUID property.
+// It searches the UUID index built by orgscanner during file scanning.
+type IDLinkResolver struct {
+    scanner *orgscanner.OrgScanner
+}
+
+// Resolve returns the location of the heading with the given ID.
+// Returns nil if no heading with that ID exists.
+// 
+// Algorithm: look up the HeaderLocation on scanner.ProcessedFiles.UuidIndex map.
+func (r *IDLinkResolver) Resolve(id string) *orgscanner.HeaderLocation
+```
+
+View generated docs: `go doc github.com/alexispurslane/org-lsp/orgscanner IDLinkResolver`
+
+#### Step 4: Implement
+
+Now implement to make tests pass:
+1. Add types with doc comments (technical spec)
+2. Add handler method to server.go
+3. Update capabilities in initialize()
+4. Run tests: `just test TestFeatureName`
+5. Debug with: `ORG_LSP_LOG_LEVEL=DEBUG just test TestFeatureName`
+
+#### Step 5: Verify & Document
+
+- Run full test suite: `just test`
+- **Update doc comments if implementation diverged from spec**
+- The code now contains both executable behavior spec (tests) and technical spec (types + comments)
+
+**Key Principle:** The only "spec documents" are:
+- `integration/*_test.go` - executable behavior specs
+- Go doc comments in the code - technical specs
+- `ARCHITECTURE.md` - high-level navigation (optional)
+
+No separate SPEC.md needed - the spec lives in the code and is always up-to-date!
 
 ### 3. Debugging Tests
 Set log level to see what's happening:
@@ -270,26 +400,47 @@ location := protocol.Location{...} // Not map[string]interface{}
 ## Common Tasks Reference
 
 ### Adding a New LSP Handler
-1. Add method to `New()` in server.go
-2. Implement handler following existing patterns
-3. Add capability in `initialize()`
-4. Write integration test in integration_test.go
+1. Add method to server.go implementing the handler
+2. Add capability in `initialize()`
+3. Write integration test in `integration/lsp_test.go`:
+   ```go
+   func TestNewFeature(t *testing.T) {
+       Given("setup context", t, setupFunc, func(t *testing.T, tc *LSPTestContext) {
+           params := protocol.NewFeatureParams{...}
+           When(t, tc, "using feature", "textDocument/newFeature", params,
+               func(t *testing.T, result ExpectedType) {
+                   Then("returns expected result", t, func(t *testing.T) {
+                       testza.AssertEqual(t, expected, result)
+                   })
+               })
+       })
+   }
+   ```
+
+### Writing Integration Tests
+1. Create test in `integration/lsp_test.go`
+2. Use `Given/When/Then` structure for readability
+3. Use chainable `Given*` helpers for setup
+4. Use `When[T]` with appropriate type parameter for LSP calls
+5. Use testza assertions for clear failure messages
+6. Run with `just test TestName`
 
 ### Modifying Link Resolution
-1. Update `resolveFileLink()` or `resolveIDLink()`
+1. Update `resolveFileLink()` or `resolveIDLink()` in server.go
 2. Ensure they return `orgscanner` domain types
-3. Update `toProtocolLocation()` and/or `toProtocolRange()` if format changes
-4. Tests in both definition and hover contexts
+3. Update `toProtocolLocation()` if format changes
+4. Run `just test` to verify both definition and hover tests pass
 
-### Debugging Hover/Definition
-1. Check log output: `ORG_LSP_LOG_LEVEL=INFO just test`
-2. Verify org scanner finds the target (check uuid-indexed count)
-3. Check `findLinkAtPosition` actually finds the link node
-4. Verify path resolution produces correct absolute path
+### Debugging Tests
+1. Run specific test: `ORG_LSP_LOG_LEVEL=DEBUG just test TestName`
+2. Check server logs for handler execution
+3. Verify LSPTestContext setup (files created, documents opened)
+4. Check response types match expected Go types
 
 ## Key Files to Understand
 - **server/server.go**: Request routing and handler logic
-- **server/integration_test.go**: Test patterns to follow
+- **integration/lsp_test_context.go**: LSPTestContext implementation and When[T] function
+- **integration/lsp_test.go**: Example tests using the new framework
 - **orgscanner/parser.go**: How org files are parsed and indexed
 - **SPEC.md**: Feature specifications and architecture diagrams
 

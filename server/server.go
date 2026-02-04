@@ -2,17 +2,16 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "go.lsp.dev/protocol"
 
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
-	glsp "github.com/tliron/glsp"
-	"github.com/tliron/glsp/server"
 )
 
 const (
@@ -24,33 +23,23 @@ var serverVer = "0.0.1" // Must be var to take address for LSP protocol
 // serverState holds the global server state (glsp.Context doesn't have State field)
 var serverState *State
 
-// New creates and returns a new LSP server instance.
-func New() *server.Server {
-	handler := protocol.Handler{
-		Initialize:                      initialize,
-		Initialized:                     initialized,
-		Shutdown:                        shutdown,
-		SetTrace:                        setTrace,
-		WorkspaceDidChangeConfiguration: workspaceDidChangeConfiguration,
-		WorkspaceSymbol:                 workspaceSymbol,
-		WorkspaceExecuteCommand:         workspaceExecuteCommand,
-		TextDocumentDidOpen:             textDocumentDidOpen,
-		TextDocumentDidChange:           textDocumentDidChange,
-		TextDocumentDidClose:            textDocumentDidClose,
-		TextDocumentDidSave:             textDocumentDidSave,
-		TextDocumentDefinition:          textDocumentDefinition,
-		TextDocumentHover:               textDocumentHover,
-		TextDocumentReferences:          textDocumentReferences,
-		TextDocumentCompletion:          textDocumentCompletion,
-		TextDocumentDocumentSymbol:      textDocumentDocumentSymbol,
-		TextDocumentCodeAction:          textDocumentCodeAction,
-	}
-	slog.Debug("Handler created", "TextDocumentDefinition", handler.TextDocumentDefinition != nil, "TextDocumentHover", handler.TextDocumentHover != nil)
-	return server.NewServer(&handler, serverName, false)
+// ServerImpl implements the protocol.Server interface for org-lsp
+type ServerImpl struct {
+	// We'll reference the global serverState during migration
 }
 
-// initialize handles the LSP initialize request.
-func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, error) {
+// New creates a new ServerImpl instance
+func New() *ServerImpl {
+	return &ServerImpl{}
+}
+
+////////////////////////// NEW GO.LSP.DEV STUBS
+
+// ensure serverImpl implements protocol.Server interface
+// Ensure ServerImpl implements protocol.Server interface
+var _ protocol.Server = (*ServerImpl)(nil)
+
+func (s *ServerImpl) Initialize(ctx context.Context, params *protocol.InitializeParams) (result *protocol.InitializeResult, err error) {
 	// Configure logging level from environment
 	logLevel := os.Getenv("ORG_LSP_LOG_LEVEL")
 	level := slog.LevelDebug // default
@@ -83,13 +72,14 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 	}
 
 	serverState = &State{}
-	serverState.OpenDocs = make(map[protocol.DocumentUri]*org.Document)
-	serverState.DocVersions = make(map[protocol.DocumentUri]int32)
-	serverState.RawContent = make(map[protocol.DocumentUri]string)
+	serverState.OpenDocs = make(map[protocol.DocumentURI]*org.Document)
+	serverState.DocVersions = make(map[protocol.DocumentURI]int32)
+	serverState.RawContent = make(map[protocol.DocumentURI]string)
 
-	if params.RootURI != nil && *params.RootURI != "" {
+	// Check if RootURI is provided (it's a string in go.lsp.dev/protocol, not a pointer)
+	if params.RootURI != "" {
 		// Convert URI to filesystem path
-		serverState.OrgScanRoot = uriToPath(*params.RootURI)
+		serverState.OrgScanRoot = uriToPath(string(params.RootURI))
 
 		// Process org files from root directory
 		slog.Info("Starting org file scan", "root", serverState.OrgScanRoot)
@@ -107,29 +97,24 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 		}
 	}
 
-	// Helper pointers for LSP protocol (fields must be pointers for optionality)
-	trueBool := true
-	truePtr := &trueBool
-	syncFull := protocol.TextDocumentSyncKindFull
-
 	// MVP capabilities only per SPEC.md Phase 1
 	capabilities := protocol.ServerCapabilities{
 		TextDocumentSync: &protocol.TextDocumentSyncOptions{
-			OpenClose: truePtr,
-			Change:    &syncFull,
+			OpenClose: true,
+			Change:    protocol.TextDocumentSyncKindFull,
 			Save: &protocol.SaveOptions{
-				IncludeText: truePtr,
+				IncludeText: true,
 			},
 		},
-		HoverProvider:           truePtr,
-		DefinitionProvider:      truePtr,
-		ReferencesProvider:      truePtr,
-		DocumentSymbolProvider:  truePtr,
-		WorkspaceSymbolProvider: truePtr,
+		HoverProvider:           true,
+		DefinitionProvider:      true,
+		ReferencesProvider:      true,
+		DocumentSymbolProvider:  true,
+		WorkspaceSymbolProvider: true,
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{":", "_"},
 		},
-		CodeActionProvider: truePtr,
+		CodeActionProvider: true,
 		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
 			Commands: []string{"org.executeCodeBlock"},
 		},
@@ -142,22 +127,168 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 		"WorkspaceSymbolProvider", capabilities.WorkspaceSymbolProvider != nil,
 		"ReferencesProvider", capabilities.ReferencesProvider != nil,
 		"CompletionProvider", capabilities.CompletionProvider != nil)
-	return protocol.InitializeResult{
+	return &protocol.InitializeResult{
 		Capabilities: capabilities,
-		ServerInfo: &protocol.InitializeResultServerInfo{
+		ServerInfo: &protocol.ServerInfo{
 			Name:    serverName,
-			Version: &serverVer,
+			Version: serverVer,
 		},
 	}, nil
 }
 
-// initialized handles the LSP initialized notification.
-func initialized(context *glsp.Context, params *protocol.InitializedParams) error {
+func (s *ServerImpl) Exit(ctx context.Context) (err error) {
 	return nil
 }
 
-// workspaceExecuteCommand handles workspace/executeCommand requests
-func workspaceExecuteCommand(context *glsp.Context, params *protocol.ExecuteCommandParams) (any, error) {
+func (s *ServerImpl) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+func (s *ServerImpl) Initialized(ctx context.Context, params *protocol.InitializedParams) (err error) {
+	slog.Info("Server initialized")
+	return nil
+}
+
+func (s *ServerImpl) SetTrace(ctx context.Context, params *protocol.SetTraceParams) error {
+	slog.Info("Set trace", "value", params.Value)
+	return nil
+}
+
+func (s *ServerImpl) LogTrace(ctx context.Context, params *protocol.LogTraceParams) (err error) {
+	return nil
+}
+
+func (s *ServerImpl) CodeLens(ctx context.Context, params *protocol.CodeLensParams) (result []protocol.CodeLens, err error) {
+	return nil, nil
+}
+func (s *ServerImpl) CodeLensResolve(ctx context.Context, params *protocol.CodeLens) (result *protocol.CodeLens, err error) {
+	return nil, nil
+}
+func (s *ServerImpl) ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) (result []protocol.ColorPresentation, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) CompletionResolve(ctx context.Context, params *protocol.CompletionItem) (result *protocol.CompletionItem, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) Declaration(ctx context.Context, params *protocol.DeclarationParams) (result []protocol.Location /* Declaration | DeclarationLink[] | null */, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) (err error) {
+	if serverState == nil {
+		return nil
+	}
+
+	uri := params.TextDocument.URI
+	slog.Info("Changing document", "uri", uri, "version", params.TextDocument.Version)
+
+	// For MVP, we only support full document sync through ContentChanges
+	if len(params.ContentChanges) > 0 {
+		change := params.ContentChanges[0]
+		slog.Debug("Change received", "change", change)
+
+		// Check if this is a full document change (RangeLength == 0 indicates full doc)
+		if change.RangeLength == 0 {
+			// Full document sync
+			text := change.Text
+			slog.Debug("Document change received (full sync)", "uri", uri, "textLen", len(text))
+
+			doc := org.New().Parse(strings.NewReader(text), string(uri))
+
+			serverState.OpenDocs[uri] = doc
+			serverState.DocVersions[uri] = params.TextDocument.Version
+			serverState.RawContent[uri] = text
+			slog.Debug("RawContent updated", "uri", uri, "contentLen", len(text))
+		} else {
+			slog.Warn("Incremental document changes not supported", "uri", uri)
+		}
+	}
+
+	return nil
+}
+func (s *ServerImpl) DidChangeConfiguration(ctx context.Context, params *protocol.DidChangeConfigurationParams) (err error) {
+	slog.Debug("Received workspace/didChangeConfiguration (ignored)")
+	return nil
+}
+
+func (s *ServerImpl) DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) (err error) {
+	return nil
+}
+
+func (s *ServerImpl) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) (err error) {
+	return nil
+}
+
+func (s *ServerImpl) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error) {
+	if serverState == nil {
+		return nil
+	}
+
+	uri := params.TextDocument.URI
+	slog.Info("Closing document", "uri", uri)
+
+	delete(serverState.OpenDocs, uri)
+	delete(serverState.DocVersions, uri)
+	delete(serverState.RawContent, uri)
+	return nil
+}
+
+func (s *ServerImpl) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) (err error) {
+	slog.Debug("textDocument/didOpen handler called")
+	if serverState == nil {
+		slog.Error("Server state is nil in didOpen")
+		return nil
+	}
+
+	uri := params.TextDocument.URI
+	slog.Info("Opening document", "uri", uri, "version", params.TextDocument.Version, "textLength", len(params.TextDocument.Text))
+
+	// Parse the document content
+	text := params.TextDocument.Text
+	doc := org.New().Parse(strings.NewReader(text), string(uri))
+
+	serverState.OpenDocs[uri] = doc
+	serverState.DocVersions[uri] = params.TextDocument.Version
+	serverState.RawContent[uri] = text
+	return nil
+}
+
+func (s *ServerImpl) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) (err error) {
+	if serverState.Scanner != nil {
+		slog.Info("Re-scanning org files on save", "file", params.TextDocument.URI)
+		err := serverState.Scanner.Process()
+		if err != nil {
+			slog.Error("Failed to re-scan org files", "error", err)
+		} else {
+			fileCount := 0
+			serverState.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
+				fileCount++
+				return true
+			})
+			slog.Info("Completed org file re-scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
+		}
+	}
+	return nil
+}
+
+func (s *ServerImpl) DocumentColor(ctx context.Context, params *protocol.DocumentColorParams) (result []protocol.ColorInformation, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) (result []protocol.DocumentHighlight, err error) {
+	return nil, nil
+}
+func (s *ServerImpl) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) (result []protocol.DocumentLink, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) DocumentLinkResolve(ctx context.Context, params *protocol.DocumentLink) (result *protocol.DocumentLink, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (result interface{}, err error) {
 	slog.Info("Executing command", "command", params.Command, "args", params.Arguments)
 
 	// Dispatch to the appropriate command handler
@@ -195,115 +326,128 @@ func workspaceExecuteCommand(context *glsp.Context, params *protocol.ExecuteComm
 		}
 
 		// Call ExecuteCodeBlock with the extracted arguments
-		return ExecuteCodeBlock(protocol.DocumentUri(uri), int(line), int(column))
+		return ExecuteCodeBlock(protocol.DocumentURI(uri), int(line), int(column))
 	default:
 		return nil, fmt.Errorf("unknown command: %s", params.Command)
 	}
 }
 
-// shutdown handles the LSP shutdown request.
-func shutdown(context *glsp.Context) error {
+func (s *ServerImpl) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) (result []protocol.TextEdit, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) Implementation(ctx context.Context, params *protocol.ImplementationParams) (result []protocol.Location, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) (result []protocol.TextEdit, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (result *protocol.Range, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) (result []protocol.TextEdit, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) Rename(ctx context.Context, params *protocol.RenameParams) (result *protocol.WorkspaceEdit, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) (result []protocol.Location, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (err error) {
 	return nil
 }
 
-// setTrace handles the LSP $/setTrace request.
-func setTrace(context *glsp.Context, params *protocol.SetTraceParams) error {
-	protocol.SetTraceValue(params.Value)
+func (s *ServerImpl) WillSaveWaitUntil(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (result []protocol.TextEdit, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) ShowDocument(ctx context.Context, params *protocol.ShowDocumentParams) (result *protocol.ShowDocumentResult, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) WillCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (result *protocol.WorkspaceEdit, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) DidCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (err error) {
 	return nil
 }
 
-// workspaceDidChangeConfiguration handles the workspace/didChangeConfiguration notification.
-// Silently ignored - we don't use configuration changes currently.
-func workspaceDidChangeConfiguration(context *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
-	slog.Debug("Received workspace/didChangeConfiguration (ignored)")
+func (s *ServerImpl) WillRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (result *protocol.WorkspaceEdit, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) DidRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (err error) {
 	return nil
 }
 
-// textDocumentDidOpen handles the LSP textDocument/didOpen notification.
-func textDocumentDidOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
-	slog.Debug("textDocument/didOpen handler called")
-	if serverState == nil {
-		slog.Error("Server state is nil in didOpen")
-		return nil
-	}
+func (s *ServerImpl) WillDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (result *protocol.WorkspaceEdit, err error) {
+	return nil, nil
+}
 
-	uri := params.TextDocument.URI
-	slog.Info("Opening document", "uri", uri, "version", params.TextDocument.Version, "textLength", len(params.TextDocument.Text))
-
-	// Parse the document content
-	text := params.TextDocument.Text
-	doc := org.New().Parse(strings.NewReader(text), string(uri))
-
-	serverState.OpenDocs[uri] = doc
-	serverState.DocVersions[uri] = params.TextDocument.Version
-	serverState.RawContent[uri] = text
+func (s *ServerImpl) DidDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (err error) {
 	return nil
 }
 
-// textDocumentDidChange handles the LSP textDocument/didChange notification.
-func textDocumentDidChange(context *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
-	if serverState == nil {
-		return nil
-	}
-
-	uri := params.TextDocument.URI
-	slog.Info("Changing document", "uri", uri, "version", params.TextDocument.Version)
-
-	// For MVP, we only support full document sync
-	// Re-parse the entire document with the new content
-	if len(params.ContentChanges) > 0 {
-		change := params.ContentChanges[0]
-		slog.Debug("Change received", "type", fmt.Sprintf("%T", change), "change", change)
-		// Type assert to access Text field
-		if changeEvent, ok := change.(protocol.TextDocumentContentChangeEventWhole); ok {
-			slog.Debug("Type assertion succeeded for TextDocumentContentChangeEventWhole")
-			text := changeEvent.Text
-			slog.Debug("Document change received", "uri", uri, "textLen", len(text), "first100", text[:min(100, len(text))])
-
-			doc := org.New().Parse(strings.NewReader(text), string(uri))
-
-			serverState.OpenDocs[uri] = doc
-			serverState.DocVersions[uri] = params.TextDocument.Version
-			serverState.RawContent[uri] = text
-			slog.Debug("RawContent updated", "uri", uri, "contentLen", len(text))
-		} else {
-			slog.Error("Type assertion failed for TextDocumentContentChangeEventWhole", "actualType", fmt.Sprintf("%T", change))
-		}
-	}
-
+func (s *ServerImpl) CodeLensRefresh(ctx context.Context) (err error) {
 	return nil
 }
 
-// textDocumentDidClose handles the LSP textDocument/didClose notification.
-func textDocumentDidClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
-	if serverState == nil {
-		return nil
-	}
+func (s *ServerImpl) PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) (result []protocol.CallHierarchyItem, err error) {
+	return nil, nil
+}
 
-	uri := params.TextDocument.URI
-	slog.Info("Closing document", "uri", uri)
+func (s *ServerImpl) IncomingCalls(ctx context.Context, params *protocol.CallHierarchyIncomingCallsParams) (result []protocol.CallHierarchyIncomingCall, err error) {
+	return nil, nil
+}
 
-	delete(serverState.OpenDocs, uri)
-	delete(serverState.DocVersions, uri)
-	delete(serverState.RawContent, uri)
+func (s *ServerImpl) OutgoingCalls(ctx context.Context, params *protocol.CallHierarchyOutgoingCallsParams) (result []protocol.CallHierarchyOutgoingCall, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (result *protocol.SemanticTokens, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (result interface{} /* SemanticTokens | SemanticTokensDelta */, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (result *protocol.SemanticTokens, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) SemanticTokensRefresh(ctx context.Context) (err error) {
 	return nil
 }
 
-// textDocumentDidSave handles the LSP textDocument/didSave notification.
-func textDocumentDidSave(context *glsp.Context, params *protocol.DidSaveTextDocumentParams) error {
-	if serverState.Scanner != nil {
-		slog.Info("Re-scanning org files on save", "file", params.TextDocument.URI)
-		err := serverState.Scanner.Process()
-		if err != nil {
-			slog.Error("Failed to re-scan org files", "error", err)
-		} else {
-			fileCount := 0
-			serverState.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
-				fileCount++
-				return true
-			})
-			slog.Info("Completed org file re-scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
-		}
-	}
+func (s *ServerImpl) LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (result *protocol.LinkedEditingRanges, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) Moniker(ctx context.Context, params *protocol.MonikerParams) (result []protocol.Moniker, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) Request(ctx context.Context, method string, params interface{}) (result interface{}, err error) {
+	return nil, nil
+}
+
+func (s *ServerImpl) WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) (err error) {
 	return nil
 }

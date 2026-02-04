@@ -1,19 +1,18 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/alexispurslane/go-org/org"
 	"github.com/alexispurslane/org-lsp/orgscanner"
-	glsp "github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "go.lsp.dev/protocol"
 )
 
-// textDocumentDocumentSymbol provides document symbols (outline view) for org headings
-func textDocumentDocumentSymbol(glspCtx *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
-	slog.Debug("textDocument/documentSymbol handler called", "uri", params.TextDocument.URI)
+func (s *ServerImpl) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (result []interface{}, err error) {
+	slog.Debug("DocumentSymbol handler called", "uri", params.TextDocument.URI)
 	if serverState == nil {
 		slog.Error("Server state is nil in documentSymbol")
 		return nil, nil
@@ -27,15 +26,19 @@ func textDocumentDocumentSymbol(glspCtx *glsp.Context, params *protocol.Document
 	}
 
 	// Convert outline sections to document symbols
-	// Outline embeds *Section, so Children is directly accessible
 	symbols := sectionsToSymbols(doc.Outline.Children)
 
-	slog.Debug("Document symbols generated", "uri", uri, "count", len(symbols))
-	return symbols, nil
+	// Convert []DocumentSymbol to []interface{}
+	result = make([]interface{}, len(symbols))
+	for i, symbol := range symbols {
+		result[i] = symbol
+	}
+
+	slog.Debug("Document symbols generated", "uri", uri, "count", len(result))
+	return result, nil
 }
 
-// workspaceSymbol provides workspace-wide symbol search across all indexed headings
-func workspaceSymbol(glspCtx *glsp.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error) {
+func (s *ServerImpl) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolParams) (result []protocol.SymbolInformation, err error) {
 	slog.Info("🔍 WORKSPACE/SYMBOL HANDLER CALLED", "query", params.Query, "queryEmpty", params.Query == "")
 
 	if serverState == nil {
@@ -88,15 +91,15 @@ func workspaceSymbol(glspCtx *glsp.Context, params *protocol.WorkspaceSymbolPara
 				Name: location.Title,
 				Kind: protocol.SymbolKindInterface, // Flat list, all same kind per SPEC
 				Location: protocol.Location{
-					URI: uri,
+					URI: protocol.DocumentURI(uri),
 					Range: protocol.Range{
 						Start: protocol.Position{
-							Line:      protocol.UInteger(location.Position.StartLine),
-							Character: protocol.UInteger(location.Position.StartColumn),
+							Line:      uint32(location.Position.StartLine),
+							Character: uint32(location.Position.StartColumn),
 						},
 						End: protocol.Position{
-							Line:      protocol.UInteger(location.Position.EndLine),
-							Character: protocol.UInteger(location.Position.EndColumn),
+							Line:      uint32(location.Position.EndLine),
+							Character: uint32(location.Position.EndColumn),
 						},
 					},
 				},
@@ -147,12 +150,12 @@ func sectionToSymbol(section *org.Section) protocol.DocumentSymbol {
 	// Create range from headline position
 	selectionRange := protocol.Range{
 		Start: protocol.Position{
-			Line:      protocol.UInteger(headline.Pos.StartLine),
-			Character: protocol.UInteger(headline.Pos.StartColumn),
+			Line:      uint32(headline.Pos.StartLine),
+			Character: uint32(headline.Pos.StartColumn),
 		},
 		End: protocol.Position{
-			Line:      protocol.UInteger(headline.Pos.EndLine),
-			Character: protocol.UInteger(headline.Pos.EndColumn),
+			Line:      uint32(headline.Pos.EndLine),
+			Character: uint32(headline.Pos.EndColumn),
 		},
 	}
 
@@ -160,18 +163,19 @@ func sectionToSymbol(section *org.Section) protocol.DocumentSymbol {
 	// For now, use same as selection range (can be refined later)
 	fullRange := selectionRange
 
+	// Build detail string from tags
+	detail := ""
+	if len(headline.Tags) > 0 {
+		detail = strings.Join(headline.Tags, " ")
+	}
+
 	symbol := protocol.DocumentSymbol{
 		Name:           name,
-		Detail:         &[]string{strings.Join(headline.Tags, " ")}[0], // Tags as detail if any
+		Detail:         detail, // Tags as detail if any
 		Kind:           kind,
 		Range:          fullRange,
 		SelectionRange: selectionRange,
 		Children:       sectionsToSymbols(section.Children),
-	}
-
-	// Clear detail if no tags
-	if len(headline.Tags) == 0 {
-		symbol.Detail = nil
 	}
 
 	return symbol
