@@ -20,6 +20,13 @@ func NewOrgScanner(root string) *OrgScanner {
 	}
 }
 
+// GetLastScanTime returns the time of the last completed scan in a thread-safe manner.
+func (s *OrgScanner) GetLastScanTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.LastScanTime
+}
+
 // Process performs an incremental scan and processes all file messages.
 // It executes the appropriate action (parse or delete) for each file.
 func (s *OrgScanner) Process() error {

@@ -20,16 +20,17 @@ import (
 
 // LSPTestContext manages server lifecycle and provides test helpers
 type LSPTestContext struct {
-	t        *testing.T
-	conn     jsonrpc2.Conn
-	ctx      context.Context
-	cancel   context.CancelFunc
-	tempDir  string
-	rootURI  string
-	server   *ourserver.ServerImpl
-	done     chan struct{}
-	listener net.Listener
-	TestData map[string]string // Storage for test-specific data like UUIDs
+	t            *testing.T
+	conn         jsonrpc2.Conn
+	ctx          context.Context
+	cancel       context.CancelFunc
+	tempDir      string
+	rootURI      string
+	server       *ourserver.ServerImpl
+	done         chan struct{}
+	listener     net.Listener
+	TestData     map[string]string // Storage for test-specific data like UUIDs
+	lastSaveTime time.Time         // Track when we last triggered a save for indexing polls
 }
 
 // NewTestContext creates a temp directory in /tmp, starts the LSP server
@@ -80,17 +81,11 @@ func NewTestContext(t *testing.T) *LSPTestContext {
 
 	// Wait for server to be ready
 	<-ready
-	time.Sleep(50 * time.Millisecond) // Give server time to start accepting
 
-	// Connect to server with retry
-	var clientConn net.Conn
-	for range 50 {
-		clientConn, err = net.DialTimeout("tcp", addr, 100*time.Millisecond)
-		if err == nil {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// Connect to server with retry (immediate retries, no sleep)
+
+	clientConn, err := net.Dial("tcp", addr)
+
 	if err != nil {
 		cancel()
 		listener.Close()
@@ -225,8 +220,8 @@ func (tc *LSPTestContext) GivenSaveFile(uri string) *LSPTestContext {
 		tc.t.Fatalf("didSave failed: %v", err)
 	}
 
-	// Give scanner time to process
-	time.Sleep(100 * time.Millisecond)
+	// Record when we triggered this save so pollUntilIndexed can wait for it
+	tc.lastSaveTime = time.Now()
 
 	return tc
 }
@@ -268,10 +263,31 @@ func requiresIndexing(method string) bool {
 	}
 }
 
-// pollUntilIndexed waits for indexing to complete for the given parameters
+// pollUntilIndexed waits for indexing to complete for the given parameters.
+// It polls until the scanner's LastScanTime is after our last save time.
 func (tc *LSPTestContext) pollUntilIndexed(params any) {
-	// Simple sleep-based polling - could be improved with actual index status checking
-	time.Sleep(200 * time.Millisecond)
+	if tc.server == nil {
+		return
+	}
+
+	// Fast path: if we haven't saved anything, indexing should already be done
+	// (the initial scan happens synchronously during Initialize)
+	if tc.lastSaveTime.IsZero() {
+		return
+	}
+
+	// Poll until the server's LastScanTime is after our last save time
+	// This indicates that the scanner has processed our save
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if tc.server.LastScanTime().After(tc.lastSaveTime) {
+			return // Indexing is complete
+		}
+		time.Sleep(5 * time.Millisecond) // Short yield between polls
+	}
+
+	// Timeout - indexing didn't complete in time
+	tc.t.Logf("Warning: Indexing did not complete within 2 seconds after save at %v", tc.lastSaveTime)
 }
 
 // DocURI returns a DocumentURI for a file relative to the test root

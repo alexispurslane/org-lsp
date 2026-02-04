@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	protocol "go.lsp.dev/protocol"
 
@@ -450,4 +451,13 @@ func (s *ServerImpl) Request(ctx context.Context, method string, params interfac
 
 func (s *ServerImpl) WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) (err error) {
 	return nil
+}
+
+// LastScanTime returns the time when the scanner last completed a scan.
+// This is used by tests to poll for indexing completion.
+func (s *ServerImpl) LastScanTime() time.Time {
+	if serverState == nil || serverState.Scanner == nil {
+		return time.Time{}
+	}
+	return serverState.Scanner.GetLastScanTime()
 }
