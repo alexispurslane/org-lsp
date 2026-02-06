@@ -1,33 +1,31 @@
 # org-lsp
 
-A minimal Language Server Protocol (LSP) implementation for [org-mode](https://orgmode.org/) files, focused on navigation and linking capabilities.
+A minimal Language Server Protocol (LSP) implementation for
+[org-mode](https://orgmode.org/) files, implemented with BDD
+specification-driven development.
+
+The point of this language server is not to implement all of the agenda, todo list, logbook, punching, and other project, scheduling, and life-management features of org-mode, but instead to focus on purely the personal wiki/PKMS aspect, hence why I'm calling it "minimal," despite having a pretty large range of features. This is primarily because, while most PKMS features can be implemented via the LSP, since the kind of navigation and completion functionality you want for code looks a lot like what you want for a PKMS, the kind of more comprehensive, flexible interfaces you want for a scheduling/life-management/project-management system like org-agenda is well out of scope for a language server.
+
+(Although I might eventually implement some basic capabilities in that direction using terminal commands; we'll see).
 
 ## Features
 
-- **Go-to-definition**: Navigate to `file:` and `id:` links
-- **Backlinks**: Find all references to the header ID under your cursor across the workspace (references are `id:` links that point to the current header's UUID)
-- **Hover previews**: See context when hovering over links
-- **ID-link autocompletion**: Complete `id:` references with heading titles, insert full UUIDs
-- **Tag completion**: Autocomplete `:tags:` based on scanned org files
-- **File link completion**: Complete `file:` links with workspace org files
-- **Block completion**: Autocomplete block types (`#+begin_src`, `#+begin_quote`, etc.)
-- **Export block completion**: Autocomplete export formats (`#+begin_export html`, etc.)
-- **Document symbols**: Outline view of all headings in the current file
-- **Workspace symbols**: Global search across all indexed headings and UUIDs
-- **Document sync**: Full support for open, change, save, and close operations
+- **Navigation**: Go-to-definition for `file:` and `id:` links, document symbols, workspace symbols, backlink references, link hover previews
+- **Completion**: Tags, file links, id links, block types, export formats
+- **Editing**: Document formatting (spacing, alignment, UUID injection), folding ranges
+- **Sync**: Full support for open, change, save, and close operations
 
 ## Installation
 
 ### From Source
 
 ```bash
-# Clone and build
 git clone https://github.com/alexispurslane/org-lsp.git
 cd org-lsp
 just install  # Installs to ~/.local/bin/org-lsp
 ```
 
-### Dependencies
+### Requirements
 
 - Go 1.25.6 or later
 - [`just`](https://just.systems/) task runner
@@ -134,67 +132,20 @@ language-servers = ["org-lsp"]
 
 ## Development
 
-### Building
-
 ```bash
 just build          # Build the server
-just test           # Run all tests (INFO logs)
-just test-quiet     # Run tests (ERROR logs only)
+just test           # Run all tests
 just fmt            # Format code
-just lint           # Run linters
-just clean          # Remove build artifacts
 ```
 
-### Project Structure
-
-```
-org-lsp/
-├── cmd/server/          # CLI entry point
-├── server/              # LSP protocol handlers and server logic
-├── orgscanner/          # File scanning, parsing, and indexing
-├── testdata/            # Test fixtures
-├── SPEC.md              # Detailed feature specification
-├── AGENTS.md            # Development guidelines for AI agents
-└── justfile             # Build automation
-```
-
-### Architecture
-
-org-lsp uses a layered architecture:
-
-1. **LSP Layer** (`glsp`) - Protocol-3.16 compliant LSP server
-2. **Server Layer** (`server/`) - Request routing and handler logic
-3. **Domain Layer** (`orgscanner/`) - Org-mode parsing and indexing (LSP-agnostic)
-
-Key design principle: Keep orgscanner pure of LSP concerns. All protocol-to-domain type conversions happen at the server boundary.
-
-### Testing
-
-Tests use `github.com/stretchr/testify` for clear assertions:
-
-```go
-require.NotNil(t, result, "Expected non-nil result")
-assert.Equal(t, expected, actual, "Values should match")
-```
-
-Run specific tests:
-```bash
-just test HoverFileLink
-just test-quiet TestServerLifecycle
-```
+**IMPORTANT**: Always use `just` for building/testing - it ensures proper build flags.
 
 ## Contributing
 
-Please see [AGENTS.md](AGENTS.md) for detailed development guidelines. Key points:
-
-- Use `just` for all build/test operations (never `go build` directly)
-- Respect package boundaries (server/ vs orgscanner/)
-- Add tests for new features
-- Ensure heading syntax is correct (no leading whitespace before `*`)
-- Follow established patterns for handler implementation
+See [AGENTS.md](AGENTS.md) for development guidelines, testing patterns, and architectural decisions.
 
 ## License
 
 BSD Zero-Clause (Public Domain equivalent) - see [LICENSE](LICENSE) file for details.
 
-For complete feature specifications and implementation details, see [SPEC.md](SPEC.md).
+For complete feature specifications, see the BDD tests in `integration/`
