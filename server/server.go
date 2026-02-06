@@ -108,11 +108,13 @@ func (s *ServerImpl) Initialize(ctx context.Context, params *protocol.Initialize
 				IncludeText: true,
 			},
 		},
-		HoverProvider:           true,
-		DefinitionProvider:      true,
-		ReferencesProvider:      true,
-		DocumentSymbolProvider:  true,
-		WorkspaceSymbolProvider: true,
+		HoverProvider:              true,
+		DefinitionProvider:         true,
+		DocumentFormattingProvider: true,
+		ReferencesProvider:         true,
+		DocumentSymbolProvider:     true,
+		WorkspaceSymbolProvider:    true,
+		FoldingRangeProvider:       true,
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{":", "_"},
 		},
@@ -128,6 +130,8 @@ func (s *ServerImpl) Initialize(ctx context.Context, params *protocol.Initialize
 		"DocumentSymbolProvider", capabilities.DocumentSymbolProvider != nil,
 		"WorkspaceSymbolProvider", capabilities.WorkspaceSymbolProvider != nil,
 		"ReferencesProvider", capabilities.ReferencesProvider != nil,
+		"DocumentFormattingProvider", capabilities.DocumentFormattingProvider != nil,
+		"FoldingRangeProvider", capabilities.FoldingRangeProvider != nil,
 		"CompletionProvider", capabilities.CompletionProvider != nil)
 	return &protocol.InitializeResult{
 		Capabilities: capabilities,
@@ -340,14 +344,6 @@ func (s *ServerImpl) ExecuteCommand(ctx context.Context, params *protocol.Execut
 	}
 }
 
-func (s *ServerImpl) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error) {
-	return nil, nil
-}
-
-func (s *ServerImpl) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) (result []protocol.TextEdit, err error) {
-	return nil, nil
-}
-
 func (s *ServerImpl) Implementation(ctx context.Context, params *protocol.ImplementationParams) (result []protocol.Location, err error) {
 	return nil, nil
 }
@@ -357,10 +353,6 @@ func (s *ServerImpl) OnTypeFormatting(ctx context.Context, params *protocol.Docu
 }
 
 func (s *ServerImpl) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (result *protocol.Range, err error) {
-	return nil, nil
-}
-
-func (s *ServerImpl) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) (result []protocol.TextEdit, err error) {
 	return nil, nil
 }
 
@@ -378,10 +370,6 @@ func (s *ServerImpl) TypeDefinition(ctx context.Context, params *protocol.TypeDe
 
 func (s *ServerImpl) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (err error) {
 	return nil
-}
-
-func (s *ServerImpl) WillSaveWaitUntil(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (result []protocol.TextEdit, err error) {
-	return nil, nil
 }
 
 func (s *ServerImpl) ShowDocument(ctx context.Context, params *protocol.ShowDocumentParams) (result *protocol.ShowDocumentResult, err error) {
