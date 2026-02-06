@@ -41,7 +41,7 @@ Final content.
 
 			When(t, tc, "requesting document symbols", "textDocument/documentSymbol", params, func(t *testing.T, result []protocol.DocumentSymbol) {
 				Then("returns hierarchical symbol outline", t, func(t *testing.T) {
-					testza.AssertTrue(t, len(result) >= 2, "Expected at least 2 top-level headings")
+					testza.AssertGreaterOrEqual(t, len(result), 2, "Expected at least 2 top-level headings")
 
 					// Find first level heading
 					var foundFirstLevel, foundSecondLevel, foundThirdLevel bool
@@ -50,14 +50,14 @@ Final content.
 						if sym.Name == "First Level Heading" {
 							foundFirstLevel = true
 							testza.AssertEqual(t, protocol.SymbolKindNamespace, sym.Kind, "First level should be Namespace")
-							testza.AssertTrue(t, len(sym.Children) >= 2, "First level should have children")
+							testza.AssertGreaterOrEqual(t, len(sym.Children), 2, "First level should have children")
 
 							// Check children
 							for _, child := range sym.Children {
 								if child.Name == "Second Level Heading" {
 									foundSecondLevel = true
 									testza.AssertEqual(t, protocol.SymbolKindClass, child.Kind, "Second level should be Class")
-									testza.AssertTrue(t, len(child.Children) >= 1, "Second level should have children")
+									testza.AssertGreaterOrEqual(t, len(child.Children), 1, "Second level should have children")
 
 									// Check grandchild
 									for _, grandchild := range child.Children {
@@ -124,7 +124,7 @@ Items to buy.
 			// Test 1: Empty query returns all symbols
 			When(t, tc, "requesting all workspace symbols", "workspace/symbol", protocol.WorkspaceSymbolParams{Query: ""}, func(t *testing.T, result []protocol.SymbolInformation) {
 				Then("returns all indexed headings", t, func(t *testing.T) {
-					testza.AssertTrue(t, len(result) >= 4, "Expected at least 4 indexed headings")
+					testza.AssertGreaterOrEqual(t, len(result), 4, "Expected at least 4 indexed headings")
 
 					// Verify specific headings exist
 					foundNames := make(map[string]bool)
@@ -145,7 +145,7 @@ Items to buy.
 			// Test 2: Query filtering - search for "Project"
 			When(t, tc, "searching workspace symbols with 'Project' query", "workspace/symbol", protocol.WorkspaceSymbolParams{Query: "Project"}, func(t *testing.T, result []protocol.SymbolInformation) {
 				Then("returns only matching symbols", t, func(t *testing.T) {
-					testza.AssertTrue(t, len(result) > 0, "Expected filtered results for 'Project'")
+					testza.AssertGreater(t, len(result), 0, "Expected filtered results for 'Project'")
 
 					for _, sym := range result {
 						testza.AssertContains(t, sym.Name, "Project", "All results should contain 'Project'")
@@ -156,7 +156,7 @@ Items to buy.
 			// Test 3: Query filtering - case insensitive
 			When(t, tc, "searching with case-insensitive query 'shopping'", "workspace/symbol", protocol.WorkspaceSymbolParams{Query: "shopping"}, func(t *testing.T, result []protocol.SymbolInformation) {
 				Then("returns matching symbol", t, func(t *testing.T) {
-					testza.AssertEqual(t, 1, len(result), "Expected exactly 1 result for 'shopping'")
+					testza.AssertLen(t, result, 1, "Expected exactly 1 result for 'shopping'")
 					testza.AssertEqual(t, "Shopping List", result[0].Name)
 				})
 			})

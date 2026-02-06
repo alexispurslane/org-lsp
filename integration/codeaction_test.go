@@ -39,7 +39,7 @@ Nested content.
 
 			When(t, tc, "requesting code actions for heading range", "textDocument/codeAction", params, func(t *testing.T, result []protocol.CodeAction) {
 				Then("returns heading to list conversion actions", t, func(t *testing.T) {
-					testza.AssertTrue(t, len(result) >= 2, "Expected at least 2 code actions for headings")
+					testza.AssertGreaterOrEqual(t, len(result), 2, "Expected at least 2 code actions for headings")
 
 					var foundOrderedList, foundBulletList bool
 					for _, action := range result {
@@ -51,8 +51,8 @@ Nested content.
 
 							changes := action.Edit.Changes
 							edit := changes[protocol.DocumentURI(tc.rootURI+"/headings.org")]
-							testza.AssertTrue(t, len(edit) >= 1, "Expected at least one text edit")
-							testza.AssertTrue(t, len(edit[0].NewText) > 0, "Transformation should produce non-empty output")
+							testza.AssertGreaterOrEqual(t, len(edit), 1, "Expected at least one text edit")
+							testza.AssertGreater(t, len(edit[0].NewText), 0, "Transformation should produce non-empty output")
 							testza.AssertEqual(t, "1. First Heading\n   Content for first heading.\n\n", edit[0].NewText)
 						}
 						if action.Title == "Convert headings to bullet list" {
@@ -61,8 +61,8 @@ Nested content.
 
 							changes := action.Edit.Changes
 							edit := changes[protocol.DocumentURI(tc.rootURI+"/headings.org")]
-							testza.AssertTrue(t, len(edit) >= 1, "Expected at least one text edit")
-							testza.AssertTrue(t, len(edit[0].NewText) > 0, "Expected non-empty transformation output")
+							testza.AssertGreaterOrEqual(t, len(edit), 1, "Expected at least one text edit")
+							testza.AssertGreater(t, len(edit[0].NewText), 0, "Expected non-empty transformation output")
 							testza.AssertEqual(t, "- First Heading\n  Content for first heading.\n\n", edit[0].NewText)
 						}
 					}
@@ -78,7 +78,7 @@ Nested content.
 								testza.AssertEqual(t, uint32(0), edit.Range.Start.Line, "Edit should start at selection line")
 								testza.AssertEqual(t, uint32(0), edit.Range.Start.Character, "Edit should start at selection character")
 								// Edit range may extend longer than selection
-								testza.AssertTrue(t, edit.Range.End.Line >= 2, "Edit end line should be at or after selection end")
+								testza.AssertGreaterOrEqual(t, edit.Range.End.Line, uint32(2), "Edit end line should be at or after selection end")
 							}
 						}
 					})
@@ -99,7 +99,7 @@ Nested content.
 
 			When(t, tc, "requesting code actions for nonzero range starting at line 2", "textDocument/codeAction", nonzeroParams, func(t *testing.T, result []protocol.CodeAction) {
 				Then("returns conversion actions with edit starting at line 2", t, func(t *testing.T) {
-					testza.AssertTrue(t, len(result) >= 1, "Expected at least 1 code action")
+					testza.AssertGreaterOrEqual(t, len(result), 1, "Expected at least 1 code action")
 
 					var foundOrderedList bool
 					for _, action := range result {
@@ -151,7 +151,7 @@ func TestCodeActionListToHeading(t *testing.T) {
 
 			When(t, tc, "requesting code actions for list item", "textDocument/codeAction", params, func(t *testing.T, result []protocol.CodeAction) {
 				Then("returns list to heading conversion action", t, func(t *testing.T) {
-					testza.AssertTrue(t, len(result) >= 1, "Expected at least 1 code action for list")
+					testza.AssertGreaterOrEqual(t, len(result), 1, "Expected at least 1 code action for list")
 
 					// Find the list conversion action
 					var foundListToHeading bool
@@ -164,8 +164,8 @@ func TestCodeActionListToHeading(t *testing.T) {
 							// Verify the transformation produces correct output
 							changes := action.Edit.Changes
 							edit := changes[protocol.DocumentURI(tc.rootURI+"/list.org")]
-							testza.AssertTrue(t, len(edit) >= 1, "Expected at least one text edit")
-							testza.AssertTrue(t, len(edit[0].NewText) > 0, "Expected non-empty transformation output")
+							testza.AssertGreaterOrEqual(t, len(edit), 1, "Expected at least one text edit")
+							testza.AssertGreater(t, len(edit[0].NewText), 0, "Expected non-empty transformation output")
 							testza.AssertEqual(t, "* Nested item\n", edit[0].NewText)
 						}
 					}
@@ -207,7 +207,7 @@ print("hello")
 
 			When(t, tc, "requesting code actions for code block", "textDocument/codeAction", params, func(t *testing.T, result []protocol.CodeAction) {
 				Then("returns code block evaluation action", t, func(t *testing.T) {
-					testza.AssertTrue(t, len(result) >= 1, "Expected at least 1 code action for code block")
+					testza.AssertGreaterOrEqual(t, len(result), 1, "Expected at least 1 code action for code block")
 
 					// Find the code block evaluation action
 					var foundEvalAction bool

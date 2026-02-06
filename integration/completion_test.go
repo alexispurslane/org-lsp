@@ -8,10 +8,6 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-func ptrTo[T any](v T) *T {
-	return &v
-}
-
 func TestIDCompletion(t *testing.T) {
 	Given("a target file with UUID heading and source file with [[id: prefix", t,
 		func(t *testing.T) *LSPTestContext {
@@ -55,7 +51,7 @@ Content here.`
 							idItems = append(idItems, item)
 						}
 					}
-					testza.AssertTrue(t, len(idItems) > 0, "Expected ID completion items")
+					testza.AssertGreater(t, len(idItems), 0, "Expected ID completion items")
 
 					// Find our test UUID
 					foundTarget := false
@@ -63,7 +59,7 @@ Content here.`
 						if strings.HasPrefix(item.InsertText, tc.TestData["targetID"]) {
 							foundTarget = true
 							testza.AssertEqual(t, "Target Heading", item.Label, "Label should be heading title")
-							testza.AssertTrue(t, strings.HasSuffix(item.InsertText, "]]"), "InsertText should include closing brackets")
+							testza.AssertContains(t, item.InsertText, "]]", "InsertText should include closing brackets")
 							break
 						}
 					}
@@ -115,7 +111,7 @@ Content here.`
 							tagItems = append(tagItems, item)
 						}
 					}
-					testza.AssertTrue(t, len(tagItems) > 0, "Expected tag completion items")
+					testza.AssertGreater(t, len(tagItems), 0, "Expected tag completion items")
 
 					// Check for expected tags
 					foundTestTag := false
@@ -177,7 +173,7 @@ func TestFileLinkCompletion(t *testing.T) {
 						}
 					}
 					t.Logf("File completion items found: %d", len(fileItems))
-					testza.AssertTrue(t, len(fileItems) > 0, "Expected file completion items")
+					testza.AssertGreater(t, len(fileItems), 0, "Expected file completion items")
 
 					// Check that our test files are in the results
 					foundTarget1 := false
@@ -228,17 +224,17 @@ func TestBlockTypeCompletion(t *testing.T) {
 							blockItems = append(blockItems, item)
 						}
 					}
-					testza.AssertTrue(t, len(blockItems) > 0, "Expected block type completion items")
+					testza.AssertGreater(t, len(blockItems), 0, "Expected block type completion items")
 
 					// Check for expected block types
-					foundTypes := make(map[string]bool)
+					foundTypes := make([]string, len(blockItems))
 					for _, item := range blockItems {
-						foundTypes[item.Label] = true
+						foundTypes = append(foundTypes, item.Label)
 					}
 
-					testza.AssertTrue(t, foundTypes["#+begin_quote"], "Expected '#+begin_quote' block type")
-					testza.AssertTrue(t, foundTypes["#+begin_src"], "Expected '#+begin_src' block type")
-					testza.AssertTrue(t, foundTypes["#+begin_verse"], "Expected '#+begin_verse' block type")
+					testza.AssertContains(t, foundTypes, "#+begin_quote", "Expected '#+begin_quote' block type")
+					testza.AssertContains(t, foundTypes, "#+begin_src", "Expected '#+begin_src' block type")
+					testza.AssertContains(t, foundTypes, "#+begin_verse", "Expected '#+begin_verse' block type")
 				})
 			})
 		},
@@ -275,16 +271,16 @@ func TestExportBlockCompletion(t *testing.T) {
 							exportItems = append(exportItems, item)
 						}
 					}
-					testza.AssertTrue(t, len(exportItems) > 0, "Expected export block completion items")
+					testza.AssertGreater(t, len(exportItems), 0, "Expected export block completion items")
 
 					// Check for expected export types
-					foundTypes := make(map[string]bool)
+					foundTypes := make([]string, len(exportItems))
 					for _, item := range exportItems {
-						foundTypes[item.Label] = true
+						foundTypes = append(foundTypes, item.Label)
 					}
 
-					testza.AssertTrue(t, foundTypes["#+begin_export_html"], "Expected '#+begin_export_html' export type")
-					testza.AssertTrue(t, foundTypes["#+begin_export_latex"], "Expected '#+begin_export_latex' export type")
+					testza.AssertContains(t, foundTypes, "#+begin_export_html", "Expected '#+begin_export_html' export type")
+					testza.AssertContains(t, foundTypes, "#+begin_export_latex", "Expected '#+begin_export_latex' export type")
 				})
 			})
 		},
@@ -330,7 +326,7 @@ Content here.`
 					// Find ID reference items
 					for _, item := range result.Items {
 						if item.Kind == protocol.CompletionItemKindReference {
-							testza.AssertFalse(t, strings.HasSuffix(item.InsertText, "]]"),
+							testza.AssertNotContains(t, strings.HasSuffix(item.InsertText, "]]"),
 								"InsertText should NOT end with ]] when brackets already exist, got %s", item.InsertText)
 						}
 					}

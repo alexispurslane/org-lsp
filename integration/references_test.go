@@ -53,7 +53,7 @@ Different file with [[id:{{.targetID}}][another reference]].`
 
 			When(t, tc, "requesting references from target heading", "textDocument/references", params, func(t *testing.T, result []protocol.Location) {
 				Then("returns 3 references from 2 source files", t, func(t *testing.T) {
-					testza.AssertEqual(t, 3, len(result), "Expected 3 references (2 in source1, 1 in source2)")
+					testza.AssertLen(t, result, 3, "Expected 3 references (2 in source1, 1 in source2)")
 
 					// Verify references come from expected files
 					sourceURIs := make(map[string]bool)
@@ -61,7 +61,7 @@ Different file with [[id:{{.targetID}}][another reference]].`
 						sourceURIs[string(loc.URI)] = true
 					}
 
-					testza.AssertEqual(t, 2, len(sourceURIs), "Expected references from 2 distinct files")
+					testza.AssertLen(t, sourceURIs, 2, "Expected references from 2 distinct files")
 					testza.AssertTrue(t, sourceURIs[tc.rootURI+"/source1.org"], "Should have reference from source1.org")
 					testza.AssertTrue(t, sourceURIs[tc.rootURI+"/source2.org"], "Should have reference from source2.org")
 				})
@@ -113,7 +113,7 @@ Another reference to [[id:{{.targetID}}]].`
 
 			When(t, tc, "requesting references from ID link itself", "textDocument/references", params, func(t *testing.T, result []protocol.Location) {
 				Then("returns 2 references including the link being queried", t, func(t *testing.T) {
-					testza.AssertEqual(t, 2, len(result), "Expected 2 references (1 in source1, 1 in source2)")
+					testza.AssertLen(t, result, 2, "Expected 2 references (1 in source1, 1 in source2)")
 
 					// Verify references are from expected files
 					sourceURIs := make(map[string]bool)
@@ -121,7 +121,7 @@ Another reference to [[id:{{.targetID}}]].`
 						sourceURIs[string(loc.URI)] = true
 					}
 
-					testza.AssertEqual(t, 2, len(sourceURIs), "Expected references from 2 distinct files")
+					testza.AssertLen(t, sourceURIs, 2, "Expected references from 2 distinct files")
 					testza.AssertTrue(t, sourceURIs[tc.rootURI+"/source1.org"], "Should include reference from source1.org (the link we're on)")
 					testza.AssertTrue(t, sourceURIs[tc.rootURI+"/source2.org"], "Should include reference from source2.org")
 				})
