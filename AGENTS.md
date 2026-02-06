@@ -450,3 +450,242 @@ location := protocol.Location{...} // Not map[string]interface{}
 - UUID index uses `sync.Map` for concurrent access during parsing
 - Files map and TagMap are regular Go maps protected by scanner mutex (O(1) lookups)
 - Document parsing happens on open/change/save
+
+## Modern Go Practices
+
+### Generic Functions (Go 1.18+)
+
+Prefer generic functions from `slices` and `maps` packages over manual loops or reflection:
+
+```go
+import "slices"
+
+// ❌ Old way - manual loop
+func contains(slice []string, item string) bool {
+    for _, s := range slice {
+        if s == item {
+            return true
+        }
+    }
+    return false
+}
+
+// ✅ Modern way - use slices package
+if slices.Contains(mySlice, "item") {
+    // ...
+}
+
+// Other useful generic functions:
+slices.Index(slice, item)        // Find index
+slices.Equal(a, b)               // Compare slices
+slices.Sort(slice)               // Sort in place
+slices.Compact(slice)            // Remove consecutive duplicates
+slices.Delete(slice, i, j)       // Delete range
+```
+
+```go
+import "maps"
+
+// ❌ Old way - manual copy
+copied := make(map[string]int)
+for k, v := range original {
+    copied[k] = v
+}
+
+// ✅ Modern way - use maps package
+copied := maps.Clone(original)
+
+// Other useful functions:
+maps.Equal(a, b)                 // Compare maps
+maps.Keys(m)                     // Get all keys
+maps.Values(m)                   // Get all values
+maps.Copy(dst, src)              // Copy all entries
+```
+
+For filtering and transforming slices, use `slices.DeleteFunc` and helper functions:
+
+```go
+// Filter slice in place
+nodes = slices.DeleteFunc(nodes, func(n org.Node) bool {
+    p, ok := n.(org.Paragraph)
+    return ok && len(p.Children) == 0
+})
+```
+
+### Error Handling with errors.As (Go 1.13+)
+
+Use structured error types and `errors.As` for type-safe error inspection instead of string matching:
+
+```go
+// Define structured error types
+type NotFoundError struct {
+    Resource string
+    ID       string
+}
+
+func (e NotFoundError) Error() string {
+    return fmt.Sprintf("%s not found: %s", e.Resource, e.ID)
+}
+
+// Return typed errors
+func findHeading(id string) (*Heading, error) {
+    // ...
+    return nil, NotFoundError{Resource: "heading", ID: id}
+}
+
+// Check error type with errors.As
+var notFound NotFoundError
+if errors.As(err, &notFound) {
+    // Handle not found specifically
+    log.Printf("Resource missing: %s", notFound.Resource)
+}
+```
+
+Checking multiple error types:
+
+```go
+var connErr *net.OpError
+var dnsErr *net.DNSError
+
+if errors.As(err, &connErr) {
+    fmt.Println("Network operation failed:", connErr.Op)
+} else if errors.As(err, &dnsErr) {
+    fmt.Println("DNS resolution failed:", dnsErr.Name)
+}
+```
+
+For simple error wrapping, use `fmt.Errorf` with `%w`:
+
+```go
+if err != nil {
+    return fmt.Errorf("processing document %s: %w", uri, err)
+}
+```
+
+### Advanced Testza Assertions
+
+Use semantically meaningful assertions from testza for clearer test output over
+generic ones like `AssertEqual` and `AssertTrue` (unless those really are the
+ones that fit best). Run `go doc github.com/MarvinJWendt/testza | grep Assert`
+to see all available assertions. 
+
+```go
+// ❌ Generic assertions - less helpful error messages
+testza.AssertEqual(t, len(items), 3, "Expected 3 items")
+testza.AssertEqual(t, result > 0, true, "Expected positive result")
+testza.AssertEqual(t, strings.Contains(s, "prefix"), true, "Expected prefix")
+
+// ✅ Semantically meaningful assertions - better error messages
+testza.AssertLen(t, items, 3, "Expected 3 items")
+testza.AssertGreater(t, result, 0, "Expected positive result")
+testza.AssertContains(t, s, "prefix", "Expected prefix in string")
+```
+
+```go
+// Nil/Empty checks
+testza.AssertNil(t, obj, "Expected nil")
+testza.AssertNotNil(t, obj, "Expected non-nil")
+testza.AssertZero(t, n, "Expected zero value")
+
+// Collection assertions
+testza.AssertLen(t, slice, 5, "Expected 5 elements")
+testza.AssertContains(t, slice, item, "Expected item in slice")
+testza.AssertNotContains(t, slice, item, "Item should not be in slice")
+testza.AssertSameElements(t, expected, actual, "Collections should have same elements")
+testza.AssertSubset(t, list, subset, "Expected subset")
+testza.AssertUnique(t, list, "Expected unique elements")
+
+// String/c assertions
+testza.AssertContains(t, str, substring, "Expected substring")
+testza.AssertNotContains(t, str, substring, "Substring should not be present")
+testza.AssertRegexp(t, regex, txt, "Expected regexp match")
+
+// Numeric comparisons
+testza.AssertGreater(t, a, b, "Expected a > b")
+testza.AssertLess(t, a, b, "Expected a < b")
+testza.AssertGreaterOrEqual(t, a, b, "Expected a >= b")
+testza.AssertLessOrEqual(t, a, b, "Expected a <= b")
+testza.AssertInRange(t, n, min, max, "Expected value in range")
+testza.AssertNumeric(t, obj, "Expected numeric type")
+
+// Type assertions
+testza.AssertImplements(t, (*io.Reader)(nil), obj, "Should implement io.Reader")
+testza.AssertKindOf(t, reflect.Slice, value, "Expected slice kind")
+testza.AssertNil(t, value, "Expected nil interface")
+
+// Error handling
+testza.AssertNoError(t, err, "Expected no error")
+testza.AssertErrorIs(t, err, targetErr, "Expected specific error type")
+
+// File system
+testza.AssertFileExists(t, path, "File should exist")
+testza.AssertNoFileExists(t, path, "File should not exist")
+testza.AssertDirExists(t, path, "Directory should exist")
+testza.AssertDirNotEmpty(t, path, "Directory should not be empty")
+
+// Behavior/performance
+testza.AssertPanics(t, f, "Expected panic")
+testza.AssertNotPanics(t, f, "Should not panic")
+testza.AssertCompletesIn(t, 100*time.Millisecond, f, "Should complete quickly")
+
+// Snapshots - useful for complex outputs
+testza.SnapshotCreateOrValidate(t, "snapshot-name", result, "Should match snapshot")
+
+// Custom complex conditions
+testza.Assert(t, func() bool {
+    for _, item := range items {
+        if item.ID == expectedID {
+            return true
+        }
+    }
+    return false
+}, "Expected to find item with ID %s", expectedID)
+```
+
+### Prefer Compile-Time Type Safety
+
+Use generics and interfaces instead of reflection where possible:
+
+```go
+// ❌ Reflection - runtime errors, slower
+func getChildren(n org.Node) []org.Node {
+    v := reflect.ValueOf(n)
+    field := v.FieldByName("Children")
+    return field.Interface().([]org.Node)
+}
+
+// ✅ Generics - compile-time safety, faster
+func filterNodes[T org.Node](nodes []org.Node, filter func(T) bool) []org.Node {
+    result := make([]org.Node, 0)
+    for _, n := range nodes {
+        if t, ok := n.(T); ok && filter(t) {
+            result = append(result, n)
+        }
+    }
+    return result
+}
+```
+
+When reflection is necessary (e.g., for AST traversal), use `reflect.TypeFor` (Go 1.22+) for type-safe reflection:
+
+```go
+// ❌ Old way - awkward syntax for getting interface types
+errorType := reflect.TypeOf((*error)(nil)).Elem()
+readerType := reflect.TypeOf((*io.Reader)(nil)).Elem()
+
+// ✅ Modern way with reflect.TypeFor - clean and readable
+errorType := reflect.TypeFor[error]()
+readerType := reflect.TypeFor[io.Reader]()
+```
+
+`reflect.TypeFor` is especially useful when you need the reflect.Type of an interface, not a concrete type. Before Go 1.22, you had to use the awkward `reflect.TypeOf((*Interface)(nil)).Elem()` pattern.
+
+Isolate reflection code and document why it's necessary:
+
+```go
+// formatChildren uses reflection to handle any node type with Children.
+// This is necessary because org.Node is an interface with many implementations.
+func formatChildren(n org.Node) org.Node {
+    // reflection logic here...
+}
+```
