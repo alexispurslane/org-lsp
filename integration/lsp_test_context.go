@@ -32,6 +32,7 @@ type LSPTestContext struct {
 	listener     net.Listener
 	TestData     map[string]string // Storage for test-specific data like UUIDs
 	lastSaveTime time.Time         // Track when we last triggered a save for indexing polls
+	docVersion   int               // Track document version for didChange notifications
 }
 
 // NewTestContext creates a temp directory in /tmp, starts the LSP server
@@ -126,16 +127,17 @@ func NewTestContext(t *testing.T) *LSPTestContext {
 	}
 
 	return &LSPTestContext{
-		t:        t,
-		conn:     jsonrpcConn,
-		ctx:      ctx,
-		cancel:   cancel,
-		tempDir:  tempDir,
-		rootURI:  rootURI,
-		server:   srv,
-		done:     done,
-		listener: listener,
-		TestData: make(map[string]string),
+		t:          t,
+		conn:       jsonrpcConn,
+		ctx:        ctx,
+		cancel:     cancel,
+		tempDir:    tempDir,
+		rootURI:    rootURI,
+		server:     srv,
+		done:       done,
+		listener:   listener,
+		TestData:   make(map[string]string),
+		docVersion: 1,
 	}
 }
 
@@ -223,6 +225,39 @@ func (tc *LSPTestContext) GivenSaveFile(uri string) *LSPTestContext {
 
 	// Record when we triggered this save so pollUntilIndexed can wait for it
 	tc.lastSaveTime = time.Now()
+
+	return tc
+}
+
+// GivenChangeDocument triggers a didChange notification with full document sync.
+// The content parameter is the new full content of the document.
+func (tc *LSPTestContext) GivenChangeDocument(uri, content string) *LSPTestContext {
+	tc.t.Helper()
+
+	fullURI := tc.resolveURI(uri)
+
+	// Increment version for this change
+	tc.docVersion++
+
+	params := protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{
+				URI: fullURI,
+			},
+			Version: int32(tc.docVersion),
+		},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			{
+				RangeLength: 0, // 0 indicates full document sync
+				Text:        content,
+			},
+		},
+	}
+
+	err := tc.conn.Notify(tc.ctx, "textDocument/didChange", params)
+	if err != nil {
+		tc.t.Fatalf("didChange failed: %v", err)
+	}
 
 	return tc
 }
