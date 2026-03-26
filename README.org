@@ -25,7 +25,7 @@ The point of this language server is not to implement all of the agenda, todo li
 
 - *Completion*
   - Tag completion with =:= syntax
-  - File link completion for =file:= and =file+sys:= links
+  - File link completion for =file:= links
   - ID link completion for =id:= links
   - Block type completion (=#+begin_src=, =#+begin_quote=, etc.)
   - Export format completion (=#+begin_export ascii=, etc.)
@@ -34,10 +34,8 @@ The point of this language server is not to implement all of the agenda, todo li
   - Convert heading subtree to ordered list (transforms nested headings/items to numbered list)
   - Convert heading subtree to unordered list (transforms nested headings/items to bullet list)
   - Convert list subtree to heading structure (transforms list to nested headings)
-  - Execute code block (run =src= blocks and show results)
 
-
-- *Formatting*
+- *Formatting* (on save, and/or on command)
   - Auto-inject UUID property into headings (generates UUID for =id:= link targets)
   - Normalize TODO keyword spacing (=* TODO Heading= not =*  TODO   Heading=)
   - Align tags to consistent column
