@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+
+          # macOS ARM64
+          GOOS=darwin GOARCH=arm64 go build -o dist/org-lsp-darwin-arm64 ./cmd/server
+
+          # macOS x86_64
+          GOOS=darwin GOARCH=amd64 go build -o dist/org-lsp-darwin-x86_64 ./cmd/server
+
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 go build -o dist/org-lsp-linux-arm64 ./cmd/server
+
+          # Linux x86_64
+          GOOS=linux GOARCH=amd64 go build -o dist/org-lsp-linux-x86_64 ./cmd/server
+
+          # Windows x86_64
+          GOOS=windows GOARCH=amd64 go build -o dist/org-lsp-windows-x86_64.exe ./cmd/server
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/org-lsp-darwin-arm64
+            dist/org-lsp-darwin-x86_64
+            dist/org-lsp-linux-arm64
+            dist/org-lsp-linux-x86_64
+            dist/org-lsp-windows-x86_64.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

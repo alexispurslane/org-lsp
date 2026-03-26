@@ -1,5 +1,7 @@
 * org-lsp
 
+[[https://github.com/alexispurslane/org-lsp/actions/workflows/test.yml][https://github.com/alexispurslane/org-lsp/actions/workflows/test.yml/badge.svg]]
+
 A minimal Language Server Protocol (LSP) implementation for [[https://orgmode.org/][org-mode]] files, implemented with BDD specification-driven development.
 
 The point of this language server is not to implement all of the agenda, todo list, logbook, punching, and other project, scheduling, and life-management features of org-mode, but instead to focus on purely the personal wiki/PKMS aspect, hence why I'm calling it "minimal," despite having a pretty large range of features. This is primarily because, while most PKMS features can be implemented via the LSP (since the kind of navigation and completion functionality you want for code looks a lot like what you want for a PKMS), the kind of more comprehensive, flexible interfaces you want for a scheduling/life-management/project-management system like org-agenda is well out of scope for a language server.
