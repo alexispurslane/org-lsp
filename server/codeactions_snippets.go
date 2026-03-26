@@ -301,14 +301,29 @@ func hasPriority(headline org.Headline) bool {
 // hasClockIn checks if the headline has an incomplete CLOCK entry
 func hasClockIn(headline org.Headline) bool {
 	for _, child := range headline.Children {
+		// Check direct Text children
 		if text, ok := child.(org.Text); ok {
-			content := text.Content
-			if strings.Contains(content, "CLOCK:") && !strings.Contains(content, "--[") {
+			if hasClockText(text.Content) {
 				return true
+			}
+		}
+		// Check Text children inside Paragraph
+		if para, ok := child.(org.Paragraph); ok {
+			for _, paraChild := range para.Children {
+				if text, ok := paraChild.(org.Text); ok {
+					if hasClockText(text.Content) {
+						return true
+					}
+				}
 			}
 		}
 	}
 	return false
+}
+
+// hasClockText checks if content has CLOCK: but no closing time
+func hasClockText(content string) bool {
+	return strings.Contains(content, "CLOCK:") && !strings.Contains(content, "--[")
 }
 
 // hasClockOut checks if the headline has an incomplete CLOCK entry (no end time)
@@ -516,10 +531,9 @@ func findTagsInsertionPoint(headline org.Headline) protocol.Range {
 // findClockRange finds the range of an existing incomplete CLOCK entry
 func findClockRange(headline org.Headline) protocol.Range {
 	for _, child := range headline.Children {
+		// Check direct Text children
 		if text, ok := child.(org.Text); ok {
-			content := text.Content
-			if strings.Contains(content, "CLOCK:") && !strings.Contains(content, "--[") {
-				// Found incomplete clock, return its end position
+			if hasClockText(text.Content) {
 				clockPos := text.Position()
 				return protocol.Range{
 					Start: protocol.Position{
@@ -530,6 +544,28 @@ func findClockRange(headline org.Headline) protocol.Range {
 						Line:      uint32(clockPos.EndLine),
 						Character: uint32(clockPos.EndColumn),
 					},
+				}
+			}
+		}
+		// Check Text children inside Paragraph
+		if para, ok := child.(org.Paragraph); ok {
+			for _, paraChild := range para.Children {
+				if text, ok := paraChild.(org.Text); ok {
+					if hasClockText(text.Content) {
+						// Use the Paragraph's position since the Text node's position
+						// doesn't account for leading whitespace in the line
+						paraPos := para.Position()
+						return protocol.Range{
+							Start: protocol.Position{
+								Line:      uint32(paraPos.EndLine),
+								Character: uint32(paraPos.EndColumn),
+							},
+							End: protocol.Position{
+								Line:      uint32(paraPos.EndLine),
+								Character: uint32(paraPos.EndColumn),
+							},
+						}
+					}
 				}
 			}
 		}
