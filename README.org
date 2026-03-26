@@ -22,9 +22,9 @@ The point of this language server is not to implement all of the agenda, todo li
   - Code lens (reference counts above headings)
 
 - *Diagnostics*
-  - Broken link detection (links to non-existent files or IDs)
-  - Malformed property drawer warnings
-  - Missing UUID warnings for linkable headings
+  - Broken =file:= link detection (links to non-existent files)
+  - Broken =id:= link detection (links to non-existent UUIDs)
+  - Scanner initialization warnings
 
 - *Completion*
   - Tag completion with =:= syntax
@@ -33,13 +33,24 @@ The point of this language server is not to implement all of the agenda, todo li
   - Block type completion (=#+begin_src=, =#+begin_quote=, etc.)
   - Export format completion (=#+begin_export ascii=, etc.)
 
-- *Code Actions* (Tree transformations)
-  - Auto-inject UUID property into headings (AST-level transformation for =id:= link targets)
-  - Property drawer formatting (AST-level normalization and fixing)
-  - Heading structure fixes (via AST manipulation, not simple text replacement)
+- *Code Actions* (Structural transformations)
+  - Convert heading subtree to ordered list (transforms nested headings/items to numbered list)
+  - Convert heading subtree to unordered list (transforms nested headings/items to bullet list)
+  - Convert list subtree to heading structure (transforms list to nested headings)
+  - Execute code block (run =src= blocks and show results)
+
+
+- *Formatting*
+  - Auto-inject UUID property into headings (generates UUID for =id:= link targets)
+  - Normalize TODO keyword spacing (=* TODO Heading= not =*  TODO   Heading=)
+  - Align tags to consistent column
+  - Format property drawers (normalize indentation)
+  - Format tables (align column widths)
+  - Collapse multiple consecutive blank lines
+  - Remove trailing whitespace
+  - Insert blank lines before headings
 
 - *Editing*
-  - Document formatting (heading alignment, spacing normalization)
   - Folding ranges (collapse/expand headings and sections)
   - Full LSP sync support (open, change, save, close)
 
