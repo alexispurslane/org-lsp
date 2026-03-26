@@ -57,7 +57,7 @@ org-lsp/
 ├── justfile                  # Build automation and run targets
 ├── ARCHITECTURE.md           # High-level architecture overview
 ├── AGENTS.md                 # This file - development guidelines
-└── README.md                 # Project documentation for users
+└── README.org                # Project documentation for users
 ```
 
 ### Package Boundaries
@@ -82,9 +82,13 @@ type ServerState struct {
 
 ### Handler Pattern
 Server handlers are organized by feature in separate files:
-- `codeactions.go`: Text document/code action handlers  
+- `codeactions.go`: Text document/code action handlers
+- `codelens.go`: Code lens handlers
 - `completions.go`: Text document/completion handlers
 - `definitions.go`: Text document/definition handlers
+- `diagnostics.go`: Diagnostic/linting handlers
+- `documenthighlight.go`: Document highlight handlers
+- `documentlink.go`: Document link handlers
 - `folding.go`: Text document/folding range handlers
 - `formatting.go`: Text document/formatting handlers
 - `symbols.go`: Document and workspace symbol handlers
@@ -133,6 +137,10 @@ Integration tests are organized by feature and use `LSPTestContext` for isolated
 - `formatting_test.go`: Document formatting tests
 - `references_test.go`: Find references tests
 - `codeaction_test.go`: Available code action tests
+- `codelens_test.go`: Code lens tests
+- `diagnostics_test.go`: Diagnostic/linting tests
+- `documentlink_test.go`: Document link detection tests
+- `documenthighlight_test.go`: Document highlight tests
 
 Each test file follows this pattern:
 
