@@ -66,7 +66,100 @@ func (s *ServerImpl) CodeAction(ctx context.Context, params *protocol.CodeAction
 	if block, found := findNodeAtPosition[org.Block](doc, cursorPos); found && strings.EqualFold(block.Name, "src") {
 		actions = append(actions, getCodeBlockAction(*block, uri))
 	}
+
+	// Check for snippet-based code actions on headlines
+	if headline, found := findNodeAtPosition[org.Headline](doc, cursorPos); found {
+		actions = append(actions, getSnippetCodeActions(*headline, uri, doc, cursorPos)...)
+	}
+
+	// Check for selected text to wrap in link
+	if hasSelection(params.Range) {
+		selectedText := getSelectedText(doc, params.Range)
+		if selectedText != "" {
+			linkSnippet := "[[" + "${1:url}" + "][" + selectedText + "]]" + "$0"
+			actions = append(actions, protocol.CodeAction{
+				Title: "Org: Wrap selection in link",
+				Kind:  protocol.CodeActionKind("source"),
+				Edit: &protocol.WorkspaceEdit{
+					DocumentChanges: []protocol.TextDocumentEdit{
+						{
+							TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
+								TextDocumentIdentifier: protocol.TextDocumentIdentifier{
+									URI: uri,
+								},
+							},
+							Edits: []any{
+								protocol.SnippetTextEdit{
+									Range: params.Range,
+									Snippet: protocol.StringValue{
+										Kind:  "snippet",
+										Value: linkSnippet,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+		}
+	}
+
 	return actions, nil
+}
+
+// hasSelection returns true if the range represents a selection (not just cursor position)
+func hasSelection(r protocol.Range) bool {
+	return r.Start.Line != r.End.Line || r.Start.Character != r.End.Character
+}
+
+// getSelectedText extracts text from the document at the given range
+func getSelectedText(doc *org.Document, r protocol.Range) string {
+	// Convert document to string and extract the selection
+	content := org.String(doc.Nodes...)
+	lines := strings.Split(content, "\n")
+
+	startLine := int(r.Start.Line)
+	startCol := int(r.Start.Character)
+	endLine := int(r.End.Line)
+	endCol := int(r.End.Character)
+
+	if startLine >= len(lines) || endLine >= len(lines) {
+		return ""
+	}
+
+	var selected strings.Builder
+	for i := startLine; i <= endLine; i++ {
+		line := lines[i]
+		if i == startLine && i == endLine {
+			// Single line selection
+			if startCol < len(line) {
+				end := endCol
+				if end > len(line) {
+					end = len(line)
+				}
+				selected.WriteString(line[startCol:end])
+			}
+		} else if i == startLine {
+			// First line
+			if startCol < len(line) {
+				selected.WriteString(line[startCol:])
+			}
+			selected.WriteString("\n")
+		} else if i == endLine {
+			// Last line
+			end := endCol
+			if end > len(line) {
+				end = len(line)
+			}
+			selected.WriteString(line[:end])
+		} else {
+			// Middle lines
+			selected.WriteString(line)
+			selected.WriteString("\n")
+		}
+	}
+
+	return selected.String()
 }
 
 // getHeadingConversionActions returns actions to convert headings to lists.
