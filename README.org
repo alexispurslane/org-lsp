@@ -1,0 +1,195 @@
+#+TITLE: org-lsp
+#+AUTHOR: Alexis Purslane
+
+* org-lsp
+
+A minimal Language Server Protocol (LSP) implementation for [[https://orgmode.org/][org-mode]] files, implemented with BDD specification-driven development.
+
+The point of this language server is not to implement all of the agenda, todo list, logbook, punching, and other project, scheduling, and life-management features of org-mode, but instead to focus on purely the personal wiki/PKMS aspect, hence why I'm calling it "minimal," despite having a pretty large range of features. This is primarily because, while most PKMS features can be implemented via the LSP (since the kind of navigation and completion functionality you want for code looks a lot like what you want for a PKMS), the kind of more comprehensive, flexible interfaces you want for a scheduling/life-management/project-management system like org-agenda is well out of scope for a language server.
+
+(Although I might eventually implement some basic capabilities in that direction using terminal commands; we'll see.)
+
+** Features
+
+- *Navigation*
+  - Go-to-definition for =file:= links (jump to target files and headings)
+  - Go-to-definition for =id:= links (jump to headings by UUID)
+  - Document symbols (outline view of all headings)
+  - Workspace symbols (search all headings across workspace)
+  - Find references / backlinks (find all links pointing to a heading or file)
+  - Hover information (preview link destinations)
+
+- *Completion*
+  - Tag completion with =#+= syntax
+  - File link completion for =file:= and =file+sys:= links
+  - ID link completion for =id:= links
+  - Block type completion (=#+begin_src=, =#+begin_quote=, etc.)
+  - Export format completion (=#+begin_export ascii=, etc.)
+
+- *Code Actions*
+  - Auto-inject UUID property into headings (for =id:= link targets)
+  - Property drawer formatting and management
+
+- *Editing*
+  - Document formatting (heading alignment, spacing normalization)
+  - Folding ranges (collapse/expand headings and sections)
+  - Full LSP sync support (open, change, save, close)
+
+- *Indexing*
+  - Incremental workspace scanning
+  - UUID index for fast =id:= link resolution
+  - Tag index for tag completion
+  - File reference tracking
+
+** Installation
+
+*** From Source
+
+#+begin_src sh
+git clone https://github.com/alexispurslane/org-lsp.git
+cd org-lsp
+just install  # Installs to ~/.local/bin/org-lsp
+#+end_src
+
+*** Requirements
+
+- Go 1.25.6 or later
+- [[https://just.systems/][just]] task runner
+
+** Usage
+
+*** Running the Server
+
+#+begin_src sh
+# Standard LSP mode (stdio)
+org-lsp --stdio
+
+# TCP mode for debugging
+org-lsp --tcp 127.0.0.1:9999
+#+end_src
+
+*** Editor Configuration
+
+**** Zed (Recommended)
+
+Install the [[https://github.com/alexispurslane/org-lsp-zed][org-lsp-zed]] extension from the extension gallery, or as a dev extension:
+
+1. Clone the extension: =git clone https://github.com/alexispurslane/org-lsp-zed.git=
+2. Build: =cargo build --target wasm32-wasi=
+3. In Zed: =zed: install dev extension= and select the directory
+
+You also need the [[https://github.com/hron/zed-org][org]] extension for syntax highlighting.
+
+**** Emacs (with eglot)
+
+#+begin_src elisp
+(use-package eglot
+  :ensure t)
+
+;; Define a custom major mode for org files with LSP support
+;; This avoids interference from built-in org-mode features
+(define-derived-mode org-lsp-mode fundamental-mode "Org+LSP"
+  "Major mode for org files with LSP support."
+  (eglot-ensure))
+
+;; Use org-lsp-mode for .org files
+(add-to-list 'auto-mode-alist '("\\.org\\'" . org-lsp-mode))
+
+;; Register org-lsp server with eglot
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               `(org-lsp-mode . ("org-lsp" "--stdio"))))
+#+end_src
+
+**** NeoVim
+
+Using =lspconfig=:
+
+#+begin_src lua
+local lspconfig = require('lspconfig')
+
+lspconfig.org_lsp.setup {
+  cmd = { "org-lsp", "--stdio" },
+  filetypes = { "org" },
+  root_dir = lspconfig.util.root_pattern(".git"),
+}
+#+end_src
+
+Or using Neovim's native LSP:
+
+#+begin_src lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "org",
+  callback = function()
+    vim.lsp.start {
+      name = "org-lsp",
+      cmd = { "org-lsp", "--stdio" },
+      root_dir = vim.fs.root(0, ".git"),
+    }
+  end,
+})
+#+end_src
+
+**** Helix
+
+In =~/.config/helix/languages.toml=:
+
+#+begin_src toml
+[language-server.org-lsp]
+command = "org-lsp"
+args = ["--stdio"]
+
+[[language]]
+name = "org"
+language-id = "org"
+file-types = ["org"]
+roots = [".git"]
+language-servers = ["org-lsp"]
+#+end_src
+
+** Development
+
+*** Building and Testing
+
+#+begin_src sh
+just build          # Build the server
+just test           # Run all tests with colored output
+just test-quiet     # Run tests quietly (ERROR logs only)
+just fmt            # Format code
+just lint           # Run golangci-lint
+just pre-commit     # Run all checks before committing
+#+end_src
+
+*IMPORTANT*: Always use =just= for building/testing - it ensures proper build flags and race detection.
+
+*** Architecture
+
+See [[file:ARCHITECTURE.md][ARCHITECTURE.md]] for a high-level overview of the system architecture, data flow, and concurrency model.
+
+*** Contributing
+
+See [[file:AGENTS.md][AGENTS.md]] for detailed development guidelines, including:
+
+- Type-first BDD workflow for adding features
+- Testing patterns with =LSPTestContext=
+- Common pitfalls and how to avoid them
+- Modern Go practices (generics, error handling, etc.)
+
+** Link Types Supported
+
+The LSP understands and provides navigation/completion for these Org link types:
+
+| Link Type | Example | Description |
+|-----------|---------|-------------|
+| File | =[[file:notes.org]]= | Link to another file |
+| File with heading | =[[file:notes.org::*Target]]= | Link to specific heading in file |
+| File with search | =[[file:notes.org::#Custom ID]]= | Link to heading by custom ID |
+| ID | =[[id:uuid-here]]= | Link by UUID property |
+| HTTP/HTTPS | =[[https://example.com]]= | External web links |
+| Custom protocols | =[[man:ls]]=, =[[info:bash]]= | Other link types (external handling) |
+
+** License
+
+BSD Zero-Clause (Public Domain equivalent) - see [[file:LICENSE][LICENSE]] file for details.
+
+For complete feature specifications, see the BDD tests in =integration/=.
