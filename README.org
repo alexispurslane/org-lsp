@@ -1,6 +1,3 @@
-#+TITLE: org-lsp
-#+AUTHOR: Alexis Purslane
-
 * org-lsp
 
 A minimal Language Server Protocol (LSP) implementation for [[https://orgmode.org/][org-mode]] files, implemented with BDD specification-driven development.
