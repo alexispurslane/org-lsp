@@ -18,17 +18,25 @@ The point of this language server is not to implement all of the agenda, todo li
   - Workspace symbols (search all headings across workspace)
   - Find references / backlinks (find all links pointing to a heading or file)
   - Hover information (preview link destinations)
+  - Document links (clickable link detection in document)
+  - Code lens (reference counts above headings)
+
+- *Diagnostics*
+  - Broken link detection (links to non-existent files or IDs)
+  - Malformed property drawer warnings
+  - Missing UUID warnings for linkable headings
 
 - *Completion*
-  - Tag completion with =#+= syntax
+  - Tag completion with =:= syntax
   - File link completion for =file:= and =file+sys:= links
   - ID link completion for =id:= links
   - Block type completion (=#+begin_src=, =#+begin_quote=, etc.)
   - Export format completion (=#+begin_export ascii=, etc.)
 
-- *Code Actions*
-  - Auto-inject UUID property into headings (for =id:= link targets)
-  - Property drawer formatting and management
+- *Code Actions* (Tree transformations)
+  - Auto-inject UUID property into headings (AST-level transformation for =id:= link targets)
+  - Property drawer formatting (AST-level normalization and fixing)
+  - Heading structure fixes (via AST manipulation, not simple text replacement)
 
 - *Editing*
   - Document formatting (heading alignment, spacing normalization)
