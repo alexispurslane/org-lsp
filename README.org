@@ -189,19 +189,6 @@ See [[file:AGENTS.md][AGENTS.md]] for detailed development guidelines, including
 - Common pitfalls and how to avoid them
 - Modern Go practices (generics, error handling, etc.)
 
-** Link Types Supported
-
-The LSP understands and provides navigation/completion for these Org link types:
-
-| Link Type | Example | Description |
-|-----------|---------|-------------|
-| File | =[[file:notes.org]]= | Link to another file |
-| File with heading | =[[file:notes.org::*Target]]= | Link to specific heading in file |
-| File with search | =[[file:notes.org::#Custom ID]]= | Link to heading by custom ID |
-| ID | =[[id:uuid-here]]= | Link by UUID property |
-| HTTP/HTTPS | =[[https://example.com]]= | External web links |
-| Custom protocols | =[[man:ls]]=, =[[info:bash]]= | Other link types (external handling) |
-
 ** License
 
 BSD Zero-Clause (Public Domain equivalent) - see [[file:LICENSE][LICENSE]] file for details.
