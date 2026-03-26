@@ -20,17 +20,17 @@ func (s *ServerImpl) Definition(ctx context.Context, params *protocol.Definition
 		}
 	}()
 	slog.Debug("Definition called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
-	if serverState == nil {
+	if s.state == nil {
 		slog.Error("Server state is nil in definition")
 		return nil, nil
 	}
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
-	doc, found := serverState.OpenDocs[uri]
+	doc, found := s.state.OpenDocs[uri]
 	if !found {
-		slog.Debug("Document not in OpenDocs", "uri", uri, "availableDocs", len(serverState.OpenDocs))
+		slog.Debug("Document not in OpenDocs", "uri", uri, "availableDocs", len(s.state.OpenDocs))
 		return nil, nil
 	}
 
@@ -52,7 +52,7 @@ func (s *ServerImpl) Definition(ctx context.Context, params *protocol.Definition
 		filePath, pos, err = resolveFileLink(uri, linkNode.URL)
 	case "id":
 		slog.Debug("Resolving ID link", "uuid", linkNode.URL)
-		filePath, pos, err = resolveIDLink(uri, linkNode.URL)
+		filePath, pos, err = resolveIDLink(s.state, uri, linkNode.URL)
 	default:
 		slog.Debug("Unknown link protocol", "protocol", linkNode.Protocol)
 		return nil, nil
@@ -74,17 +74,17 @@ func (s *ServerImpl) Definition(ctx context.Context, params *protocol.Definition
 
 func (s *ServerImpl) Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error) {
 	slog.Debug("Hover handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
-	if serverState == nil {
+	if s.state == nil {
 		slog.Error("Server state is nil in hover")
 		return nil, nil
 	}
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
-	doc, found := serverState.OpenDocs[uri]
+	doc, found := s.state.OpenDocs[uri]
 	if !found {
-		slog.Debug("Document not found in OpenDocs for hover", "uri", uri, "availableDocs", len(serverState.OpenDocs))
+		slog.Debug("Document not found in OpenDocs for hover", "uri", uri, "availableDocs", len(s.state.OpenDocs))
 		return nil, nil
 	}
 
@@ -103,7 +103,7 @@ func (s *ServerImpl) Hover(ctx context.Context, params *protocol.HoverParams) (r
 	case "file":
 		filePath, targetPos, resolveErr = resolveFileLink(uri, linkNode.URL)
 	case "id":
-		filePath, targetPos, resolveErr = resolveIDLink(uri, linkNode.URL)
+		filePath, targetPos, resolveErr = resolveIDLink(s.state, uri, linkNode.URL)
 	default:
 		return nil, nil
 	}
@@ -138,14 +138,14 @@ func (s *ServerImpl) Hover(ctx context.Context, params *protocol.HoverParams) (r
 }
 
 func (s *ServerImpl) References(ctx context.Context, params *protocol.ReferenceParams) (result []protocol.Location, err error) {
-	if serverState == nil {
+	if s.state == nil {
 		return nil, nil
 	}
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
-	doc, found := serverState.OpenDocs[uri]
+	doc, found := s.state.OpenDocs[uri]
 	if !found {
 		slog.Debug("Document not in OpenDocs", "uri", uri)
 		return nil, nil
@@ -157,7 +157,7 @@ func (s *ServerImpl) References(ctx context.Context, params *protocol.ReferenceP
 		// Check if this is an id: link
 		if linkUUID, ok := strings.CutPrefix(link.URL, "id:"); ok && linkUUID != "" {
 			slog.Debug("Found id: link at cursor, finding references", "uuid", linkUUID)
-			locations, err := findIDReferences(linkUUID)
+			locations, err := findIDReferences(s.state, linkUUID)
 			if err != nil {
 				return nil, err
 			}
@@ -175,7 +175,7 @@ func (s *ServerImpl) References(ctx context.Context, params *protocol.ReferenceP
 	for _, prop := range headline.Properties.Properties {
 		if prop[0] == "ID" && prop[1] != "" {
 			uuid := prop[1]
-			locations, err := findIDReferences(uuid)
+			locations, err := findIDReferences(s.state, uuid)
 			if err != nil {
 				return nil, err
 			}
@@ -231,15 +231,15 @@ func resolveFileLink(currentURI protocol.DocumentURI, linkURL string) (string, o
 }
 
 // resolveIDLink resolves an id: link via UUID index and returns the target position
-func resolveIDLink(currentURI protocol.DocumentURI, uuid string) (string, org.Position, error) {
-	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
+func resolveIDLink(state *State, currentURI protocol.DocumentURI, uuid string) (string, org.Position, error) {
+	if state.Scanner == nil || state.Scanner.ProcessedFiles == nil {
 		return "", org.Position{}, fmt.Errorf("no processed files")
 	}
 
 	uuid = uuid[3:] // remove "id:"
 
 	// Look up UUID in index
-	locInterface, found := serverState.Scanner.ProcessedFiles.UuidIndex.Load(orgscanner.UUID(uuid))
+	locInterface, found := state.Scanner.ProcessedFiles.UuidIndex.Load(orgscanner.UUID(uuid))
 	if !found {
 		return "", org.Position{}, fmt.Errorf("UUID not found")
 	}
@@ -250,17 +250,17 @@ func resolveIDLink(currentURI protocol.DocumentURI, uuid string) (string, org.Po
 	}
 
 	// Resolve relative path to absolute using workspace root
-	if serverState.OrgScanRoot == "" {
+	if state.OrgScanRoot == "" {
 		return "", org.Position{}, fmt.Errorf("no workspace root configured")
 	}
 
 	// The FilePath stored in HeaderLocation is relative to OrgScanRoot
-	absPath := filepath.Join(serverState.OrgScanRoot, location.FilePath)
+	absPath := filepath.Join(state.OrgScanRoot, location.FilePath)
 
 	// Clean the path (resolve . and ..)
 	absPath = filepath.Clean(absPath)
 
-	slog.Debug("Resolved ID link path", "relativePath", location.FilePath, "absPath", absPath, "orgScanRoot", serverState.OrgScanRoot)
+	slog.Debug("Resolved ID link path", "relativePath", location.FilePath, "absPath", absPath, "orgScanRoot", state.OrgScanRoot)
 
 	return absPath, location.Position, nil
 }
@@ -307,15 +307,15 @@ func joinLines(lines []string, start, end int) string {
 	return context.String()
 }
 
-func findIDReferences(targetUUID string) ([]protocol.Location, error) {
-	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
+func findIDReferences(state *State, targetUUID string) ([]protocol.Location, error) {
+	if state.Scanner == nil || state.Scanner.ProcessedFiles == nil {
 		return nil, nil
 	}
 
 	var locations []protocol.Location
 
 	// Walk through all processed files using sync.Map.Range
-	serverState.Scanner.ProcessedFiles.Files.Range(func(key, value any) bool {
+	state.Scanner.ProcessedFiles.Files.Range(func(key, value any) bool {
 		fileInfo, ok := value.(*orgscanner.FileInfo)
 		if !ok || fileInfo.ParsedOrg == nil {
 			return true // continue iteration
@@ -329,7 +329,7 @@ func findIDReferences(targetUUID string) ([]protocol.Location, error) {
 				if linkUUID, ok0 := strings.CutPrefix(link.URL, "id:"); ok0 {
 					if linkUUID == targetUUID {
 						// Convert link position to absolute file path
-						absPath := filepath.Join(serverState.OrgScanRoot, fileInfo.Path)
+						absPath := filepath.Join(state.OrgScanRoot, fileInfo.Path)
 						absPath = filepath.Clean(absPath)
 
 						loc, err := toProtocolLocation(absPath, link.Pos)

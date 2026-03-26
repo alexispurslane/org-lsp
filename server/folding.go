@@ -12,14 +12,14 @@ import (
 // Returns foldable regions for headings, blocks, and drawers in the document.
 // Headings use Comment kind, blocks and drawers use Region kind.
 func (s *ServerImpl) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error) {
-	if serverState == nil {
+	if s.state == nil {
 		return nil, nil
 	}
 
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
-	doc, ok := serverState.OpenDocs[params.TextDocument.URI]
+	doc, ok := s.state.OpenDocs[params.TextDocument.URI]
 	if !ok {
 		return nil, nil
 	}

@@ -37,10 +37,12 @@ build-testcolor:
     @go build -o {{ testcolor_bin }} ./cmd/testcolor 2>/dev/null || true
 
 # Runs with race detector and limited parallelism for thread-safety verification
+
+# Runs with race detector and limited parallelism for thread-safety verification
 test filter="": build-testcolor
     @echo "Running LSP server integration tests (with race detector)..."
     @mkdir -p bin
-    ORG_LSP_LOG_LEVEL=INFO go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./... 2>&1 | {{ testcolor_bin }}
+    ORG_LSP_LOG_LEVEL=INFO go test -v -race -parallel=10 -timeout=60s -run="{{ filter }}" ./... 2>&1 | {{ testcolor_bin }}
 
 # Run tests quietly (no INFO logs, optional filter argument)
 
@@ -48,7 +50,7 @@ test filter="": build-testcolor
 test-quiet filter="": build-testcolor
     @echo "Running tests quietly (with race detector)..."
     @mkdir -p bin
-    ORG_LSP_LOG_LEVEL=ERROR go test -v -race -parallel=4 -timeout=60s -run="{{ filter }}" ./... 2>&1 | {{ testcolor_bin }}
+    ORG_LSP_LOG_LEVEL=ERROR go test -v -race -parallel=10 -timeout=60s -run="{{ filter }}" ./... 2>&1 | {{ testcolor_bin }}
 
 # Format code
 fmt:

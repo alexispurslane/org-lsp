@@ -180,7 +180,8 @@ func toProtocolLocation(absPath string, pos org.Position) (protocol.Location, er
 	}, nil
 }
 
-// toProtocolRange converts an org Position to LSP Range
+// toProtocolRange converts an org Position to LSP Range.
+// go-org already uses 0-based line numbers, compatible with LSP.
 func toProtocolRange(pos org.Position) protocol.Range {
 	return protocol.Range{
 		Start: protocol.Position{

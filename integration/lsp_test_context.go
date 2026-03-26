@@ -3,11 +3,13 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"text/template"
 	"time"
@@ -33,6 +35,10 @@ type LSPTestContext struct {
 	TestData     map[string]string // Storage for test-specific data like UUIDs
 	lastSaveTime time.Time         // Track when we last triggered a save for indexing polls
 	docVersion   int               // Track document version for didChange notifications
+
+	// Notification capture
+	notificationsMu sync.RWMutex
+	notifications   map[string][]json.RawMessage // method -> []params (keeps history)
 }
 
 // NewTestContext creates a temp directory in /tmp, starts the LSP server
@@ -63,7 +69,7 @@ func NewTestContext(t *testing.T) *LSPTestContext {
 	}
 	addr := listener.Addr().String()
 
-	go func() {
+	go func(s *ourserver.ServerImpl) {
 		defer close(done)
 		close(ready) // Signal that listener is ready
 		for {
@@ -71,15 +77,16 @@ func NewTestContext(t *testing.T) *LSPTestContext {
 			if err != nil {
 				return // Listener closed
 			}
-			go func(c net.Conn) {
+			go func(c net.Conn, server *ourserver.ServerImpl) {
 				defer c.Close()
 				logger, _ := zap.NewProduction()
 				stream := lspstream.NewLargeBufferStream(c)
-				_, srvConn, _ := protocol.NewServer(ctx, srv, stream, logger)
+				_, srvConn, client := protocol.NewServer(ctx, server, stream, logger)
+				server.SetClient(client)
 				<-srvConn.Done()
-			}(conn)
+			}(conn, s)
 		}
-	}()
+	}(srv)
 
 	// Wait for server to be ready
 	<-ready
@@ -95,12 +102,32 @@ func NewTestContext(t *testing.T) *LSPTestContext {
 		t.Fatalf("Failed to connect to server: %v", err)
 	}
 
+	// Initialize server URI (must be defined before creating context)
+	rootURI := "file://" + tempDir
+
 	// Create client-side JSON-RPC connection (same pattern as existing tests)
 	jsonrpcConn := jsonrpc2.NewConn(lspstream.NewLargeBufferStream(clientConn))
-	jsonrpcConn.Go(ctx, nil) // Start background reader
+
+	// Create test context with notification capture
+	tc := &LSPTestContext{
+		t:             t,
+		conn:          jsonrpcConn,
+		ctx:           ctx,
+		cancel:        cancel,
+		tempDir:       tempDir,
+		rootURI:       rootURI,
+		server:        srv,
+		done:          done,
+		listener:      listener,
+		TestData:      make(map[string]string),
+		docVersion:    1,
+		notifications: make(map[string][]json.RawMessage),
+	}
+
+	// Start background reader with notification capture
+	jsonrpcConn.Go(ctx, tc.notificationHandler)
 
 	// Initialize server
-	rootURI := "file://" + tempDir
 	initParams := protocol.InitializeParams{
 		ProcessID: int32(os.Getpid()),
 		RootURI:   protocol.DocumentURI(rootURI),
@@ -126,25 +153,26 @@ func NewTestContext(t *testing.T) *LSPTestContext {
 		t.Fatalf("Initialized notification failed: %v", err)
 	}
 
-	return &LSPTestContext{
-		t:          t,
-		conn:       jsonrpcConn,
-		ctx:        ctx,
-		cancel:     cancel,
-		tempDir:    tempDir,
-		rootURI:    rootURI,
-		server:     srv,
-		done:       done,
-		listener:   listener,
-		TestData:   make(map[string]string),
-		docVersion: 1,
-	}
+	return tc
 }
 
 // GivenFile creates a file in the temp directory with template substitution.
 // The path is relative to the temp directory root.
 // Content is treated as a Go text/template, with tc.TestData as the data context.
 // Use {{.KeyName}} to substitute values from TestData.
+// notificationHandler handles incoming JSON-RPC notifications from the server
+func (tc *LSPTestContext) notificationHandler(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	// Only capture notifications (not calls)
+	if _, isNotification := req.(*jsonrpc2.Notification); !isNotification {
+		return nil
+	}
+	tc.notificationsMu.Lock()
+	tc.notifications[req.Method()] = append(tc.notifications[req.Method()], req.Params())
+	tc.notificationsMu.Unlock()
+	// No reply needed for notifications
+	return nil
+}
+
 func (tc *LSPTestContext) GivenFile(path, content string) *LSPTestContext {
 	tc.t.Helper()
 
@@ -289,10 +317,58 @@ func (tc *LSPTestContext) Shutdown() {
 	<-tc.done
 }
 
+// NotificationCount returns the number of captured notifications for a method
+func (tc *LSPTestContext) NotificationCount(method string) int {
+	tc.notificationsMu.RLock()
+	defer tc.notificationsMu.RUnlock()
+	return len(tc.notifications[method])
+}
+
+// GetNotifications returns all captured notifications for a method
+func (tc *LSPTestContext) GetNotifications(method string) []json.RawMessage {
+	tc.notificationsMu.RLock()
+	defer tc.notificationsMu.RUnlock()
+
+	result := make([]json.RawMessage, len(tc.notifications[method]))
+	copy(result, tc.notifications[method])
+	return result
+}
+
+// PollNotification waits for at least one notification of the given method
+func (tc *LSPTestContext) PollNotification(method string, timeout time.Duration) []json.RawMessage {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		tc.notificationsMu.RLock()
+		notifications := tc.notifications[method]
+		tc.notificationsMu.RUnlock()
+
+		if len(notifications) > 0 {
+			result := make([]json.RawMessage, len(notifications))
+			copy(result, notifications)
+			return result
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+	return nil
+}
+
+// ClearNotifications clears captured notifications for a method (or all if method is empty)
+func (tc *LSPTestContext) ClearNotifications(method string) {
+	tc.notificationsMu.Lock()
+	defer tc.notificationsMu.Unlock()
+
+	if method == "" {
+		tc.notifications = make(map[string][]json.RawMessage)
+	} else {
+		delete(tc.notifications, method)
+	}
+}
+
 // requiresIndexing returns true if the method requires data to be indexed
 func requiresIndexing(method string) bool {
 	switch method {
-	case "textDocument/definition", "textDocument/references":
+	case "textDocument/definition", "textDocument/references", "textDocument/codeLens":
 		return true
 	default:
 		return false

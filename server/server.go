@@ -3,10 +3,10 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	protocol "go.lsp.dev/protocol"
@@ -21,17 +21,31 @@ const (
 
 var serverVer = "0.0.1" // Must be var to take address for LSP protocol
 
-// serverState holds the global server state (glsp.Context doesn't have State field)
-var serverState *State
-
 // ServerImpl implements the protocol.Server interface for org-lsp
 type ServerImpl struct {
-	// We'll reference the global serverState during migration
+	client   protocol.Client // LSP client for sending notifications
+	clientMu sync.RWMutex    // Protects client field
+	state    *State          // Per-instance server state
 }
 
 // New creates a new ServerImpl instance
 func New() *ServerImpl {
 	return &ServerImpl{}
+}
+
+// SetClient sets the LSP client for sending notifications
+func (s *ServerImpl) SetClient(client protocol.Client) {
+	s.clientMu.Lock()
+	defer s.clientMu.Unlock()
+	s.client = client
+	slog.Info("LSP client connected")
+}
+
+// GetClient returns the LSP client
+func (s *ServerImpl) GetClient() protocol.Client {
+	s.clientMu.RLock()
+	defer s.clientMu.RUnlock()
+	return s.client
 }
 
 ////////////////////////// NEW GO.LSP.DEV STUBS
@@ -72,30 +86,33 @@ func (s *ServerImpl) Initialize(ctx context.Context, params *protocol.Initialize
 		slog.Info("📋 Client has no workspace symbol capabilities")
 	}
 
-	serverState = &State{}
-	serverState.OpenDocs = make(map[protocol.DocumentURI]*org.Document)
-	serverState.DocVersions = make(map[protocol.DocumentURI]int32)
-	serverState.RawContent = make(map[protocol.DocumentURI]string)
+	s.state = &State{}
+	s.state.OpenDocs = make(map[protocol.DocumentURI]*org.Document)
+	s.state.DocVersions = make(map[protocol.DocumentURI]int32)
+	s.state.RawContent = make(map[protocol.DocumentURI]string)
+	s.clientMu.RLock()
+	s.state.Client = s.client
+	s.clientMu.RUnlock()
 
 	// Check if RootURI is provided (it's a string in go.lsp.dev/protocol, not a pointer)
 	if params.RootURI != "" {
 		// Convert URI to filesystem path
-		serverState.OrgScanRoot = uriToPath(string(params.RootURI))
+		s.state.OrgScanRoot = uriToPath(string(params.RootURI))
 
 		// Process org files from root directory
-		slog.Info("Starting org file scan", "root", serverState.OrgScanRoot)
-		serverState.Scanner = orgscanner.NewOrgScanner(serverState.OrgScanRoot)
-		err := serverState.Scanner.Process()
+		slog.Info("Starting org file scan", "root", s.state.OrgScanRoot)
+		s.state.Scanner = orgscanner.NewOrgScanner(s.state.OrgScanRoot)
+		err := s.state.Scanner.Process()
 		if err != nil {
 			slog.Error("Failed to scan org files", "error", err)
 			return nil, err
 		} else {
 			fileCount := 0
-			serverState.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
+			s.state.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
 				fileCount++
 				return true
 			})
-			slog.Info("Completed org file scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
+			slog.Info("Completed org file scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(s.state.Scanner.ProcessedFiles))
 		}
 	}
 
@@ -119,9 +136,10 @@ func (s *ServerImpl) Initialize(ctx context.Context, params *protocol.Initialize
 			TriggerCharacters: []string{":", "_"},
 		},
 		CodeActionProvider: true,
-		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-			Commands: []string{"org.executeCodeBlock"},
+		DocumentLinkProvider: &protocol.DocumentLinkOptions{
+			ResolveProvider: false,
 		},
+		SelectionRangeProvider: true,
 	}
 
 	slog.Info("📤 Initialize response",
@@ -132,7 +150,8 @@ func (s *ServerImpl) Initialize(ctx context.Context, params *protocol.Initialize
 		"ReferencesProvider", capabilities.ReferencesProvider != nil,
 		"DocumentFormattingProvider", capabilities.DocumentFormattingProvider != nil,
 		"FoldingRangeProvider", capabilities.FoldingRangeProvider != nil,
-		"CompletionProvider", capabilities.CompletionProvider != nil)
+		"CompletionProvider", capabilities.CompletionProvider != nil,
+		"DocumentLinkProvider", capabilities.DocumentLinkProvider != nil)
 	return &protocol.InitializeResult{
 		Capabilities: capabilities,
 		ServerInfo: &protocol.ServerInfo{
@@ -164,12 +183,14 @@ func (s *ServerImpl) LogTrace(ctx context.Context, params *protocol.LogTracePara
 	return nil
 }
 
-func (s *ServerImpl) CodeLens(ctx context.Context, params *protocol.CodeLensParams) (result []protocol.CodeLens, err error) {
-	return nil, nil
-}
 func (s *ServerImpl) CodeLensResolve(ctx context.Context, params *protocol.CodeLens) (result *protocol.CodeLens, err error) {
 	return nil, nil
 }
+
+func (s *ServerImpl) SelectionRange(ctx context.Context, params *protocol.SelectionRangeParams) (result []protocol.SelectionRange, err error) {
+	return nil, nil
+}
+
 func (s *ServerImpl) ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) (result []protocol.ColorPresentation, err error) {
 	return nil, nil
 }
@@ -183,11 +204,11 @@ func (s *ServerImpl) Declaration(ctx context.Context, params *protocol.Declarati
 }
 
 func (s *ServerImpl) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) (err error) {
-	if serverState == nil {
+	if s.state == nil {
 		return nil
 	}
-	serverState.Mu.Lock()
-	defer serverState.Mu.Unlock()
+	s.state.Mu.Lock()
+	defer s.state.Mu.Unlock()
 
 	uri := params.TextDocument.URI
 	slog.Info("Changing document", "uri", uri, "version", params.TextDocument.Version)
@@ -205,10 +226,15 @@ func (s *ServerImpl) DidChange(ctx context.Context, params *protocol.DidChangeTe
 
 			doc := org.New().Parse(strings.NewReader(text), string(uri))
 
-			serverState.OpenDocs[uri] = doc
-			serverState.DocVersions[uri] = params.TextDocument.Version
-			serverState.RawContent[uri] = text
+			s.state.OpenDocs[uri] = doc
+			s.state.DocVersions[uri] = params.TextDocument.Version
+			s.state.RawContent[uri] = text
 			slog.Debug("RawContent updated", "uri", uri, "contentLen", len(text))
+
+			// Publish diagnostics for the updated document
+			if s.state.Client != nil {
+				PublishDiagnosticsForDocument(s.state, uri, doc)
+			}
 		} else {
 			slog.Warn("Incremental document changes not supported", "uri", uri)
 		}
@@ -230,29 +256,29 @@ func (s *ServerImpl) DidChangeWorkspaceFolders(ctx context.Context, params *prot
 }
 
 func (s *ServerImpl) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error) {
-	if serverState == nil {
+	if s.state == nil {
 		return nil
 	}
-	serverState.Mu.Lock()
-	defer serverState.Mu.Unlock()
+	s.state.Mu.Lock()
+	defer s.state.Mu.Unlock()
 
 	uri := params.TextDocument.URI
 	slog.Info("Closing document", "uri", uri)
 
-	delete(serverState.OpenDocs, uri)
-	delete(serverState.DocVersions, uri)
-	delete(serverState.RawContent, uri)
+	delete(s.state.OpenDocs, uri)
+	delete(s.state.DocVersions, uri)
+	delete(s.state.RawContent, uri)
 	return nil
 }
 
 func (s *ServerImpl) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) (err error) {
 	slog.Debug("textDocument/didOpen handler called")
-	if serverState == nil {
+	if s.state == nil {
 		slog.Error("Server state is nil in didOpen")
 		return nil
 	}
-	serverState.Mu.Lock()
-	defer serverState.Mu.Unlock()
+	s.state.Mu.Lock()
+	defer s.state.Mu.Unlock()
 
 	uri := params.TextDocument.URI
 	slog.Info("Opening document", "uri", uri, "version", params.TextDocument.Version, "textLength", len(params.TextDocument.Text))
@@ -261,25 +287,41 @@ func (s *ServerImpl) DidOpen(ctx context.Context, params *protocol.DidOpenTextDo
 	text := params.TextDocument.Text
 	doc := org.New().Parse(strings.NewReader(text), string(uri))
 
-	serverState.OpenDocs[uri] = doc
-	serverState.DocVersions[uri] = params.TextDocument.Version
-	serverState.RawContent[uri] = text
+	s.state.OpenDocs[uri] = doc
+	s.state.DocVersions[uri] = params.TextDocument.Version
+	s.state.RawContent[uri] = text
+
+	// Publish diagnostics for broken links
+	if s.state.Client != nil {
+		PublishDiagnosticsForDocument(s.state, uri, doc)
+	}
+
 	return nil
 }
 
 func (s *ServerImpl) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) (err error) {
-	if serverState.Scanner != nil {
+	if s.state.Scanner != nil {
 		slog.Info("Re-scanning org files on save", "file", params.TextDocument.URI)
-		err := serverState.Scanner.Process()
+		err := s.state.Scanner.Process()
 		if err != nil {
 			slog.Error("Failed to re-scan org files", "error", err)
 		} else {
 			fileCount := 0
-			serverState.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
+			s.state.Scanner.ProcessedFiles.Files.Range(func(_, _ any) bool {
 				fileCount++
 				return true
 			})
-			slog.Info("Completed org file re-scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(serverState.Scanner.ProcessedFiles))
+			slog.Info("Completed org file re-scan", "files_scanned", fileCount, "uuids_indexed", countUUIDs(s.state.Scanner.ProcessedFiles))
+		}
+	}
+
+	// Publish diagnostics for the saved document
+	if s.state != nil && s.state.Client != nil {
+		s.state.Mu.RLock()
+		doc, ok := s.state.OpenDocs[params.TextDocument.URI]
+		s.state.Mu.RUnlock()
+		if ok {
+			PublishDiagnosticsForDocument(s.state, params.TextDocument.URI, doc)
 		}
 	}
 	return nil
@@ -289,59 +331,8 @@ func (s *ServerImpl) DocumentColor(ctx context.Context, params *protocol.Documen
 	return nil, nil
 }
 
-func (s *ServerImpl) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) (result []protocol.DocumentHighlight, err error) {
-	return nil, nil
-}
-func (s *ServerImpl) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) (result []protocol.DocumentLink, err error) {
-	return nil, nil
-}
-
-func (s *ServerImpl) DocumentLinkResolve(ctx context.Context, params *protocol.DocumentLink) (result *protocol.DocumentLink, err error) {
-	return nil, nil
-}
-
 func (s *ServerImpl) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (result interface{}, err error) {
-	slog.Info("Executing command", "command", params.Command, "args", params.Arguments)
-
-	// Dispatch to the appropriate command handler
-	switch params.Command {
-	case "org.executeCodeBlock":
-		// Extract arguments: uri (string), line (int), column (int)
-		if len(params.Arguments) != 3 {
-			return nil, fmt.Errorf("org.executeCodeBlock requires 3 arguments: uri, line, column")
-		}
-
-		// Extract and cast the arguments
-		uri, ok := params.Arguments[0].(string)
-		if !ok {
-			return nil, fmt.Errorf("invalid uri argument")
-		}
-
-		line, ok := params.Arguments[1].(float64)
-		if !ok {
-			// Try as int64 for glsp/protocol handling
-			lineInt, okInt := params.Arguments[1].(int64)
-			if !okInt {
-				return nil, fmt.Errorf("invalid line argument")
-			}
-			line = float64(lineInt)
-		}
-
-		column, ok := params.Arguments[2].(float64)
-		if !ok {
-			// Try as int64 for glsp/protocol handling
-			colInt, okInt := params.Arguments[2].(int64)
-			if !okInt {
-				return nil, fmt.Errorf("invalid column argument")
-			}
-			column = float64(colInt)
-		}
-
-		// Call ExecuteCodeBlock with the extracted arguments
-		return ExecuteCodeBlock(protocol.DocumentURI(uri), int(line), int(column))
-	default:
-		return nil, fmt.Errorf("unknown command: %s", params.Command)
-	}
+	return nil, nil
 }
 
 func (s *ServerImpl) Implementation(ctx context.Context, params *protocol.ImplementationParams) (result []protocol.Location, err error) {
@@ -451,8 +442,8 @@ func (s *ServerImpl) WorkDoneProgressCancel(ctx context.Context, params *protoco
 // LastScanTime returns the time when the scanner last completed a scan.
 // This is used by tests to poll for indexing completion.
 func (s *ServerImpl) LastScanTime() time.Time {
-	if serverState == nil || serverState.Scanner == nil {
+	if s.state == nil || s.state.Scanner == nil {
 		return time.Time{}
 	}
-	return serverState.Scanner.GetLastScanTime()
+	return s.state.Scanner.GetLastScanTime()
 }

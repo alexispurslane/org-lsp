@@ -13,15 +13,15 @@ import (
 
 func (s *ServerImpl) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (result []interface{}, err error) {
 	slog.Debug("DocumentSymbol handler called", "uri", params.TextDocument.URI)
-	if serverState == nil {
+	if s.state == nil {
 		slog.Error("Server state is nil in documentSymbol")
 		return nil, nil
 	}
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
-	doc, found := serverState.OpenDocs[uri]
+	doc, found := s.state.OpenDocs[uri]
 	if !found {
 		slog.Debug("Document not in OpenDocs", "uri", uri)
 		return nil, nil
@@ -43,14 +43,14 @@ func (s *ServerImpl) DocumentSymbol(ctx context.Context, params *protocol.Docume
 func (s *ServerImpl) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolParams) (result []protocol.SymbolInformation, err error) {
 	slog.Info("🔍 WORKSPACE/SYMBOL HANDLER CALLED", "query", params.Query, "queryEmpty", params.Query == "")
 
-	if serverState == nil {
+	if s.state == nil {
 		slog.Error("❌ serverState is NIL")
 		return nil, nil
 	}
-	slog.Info("✅ serverState exists", "orgScanRoot", serverState.OrgScanRoot)
+	slog.Info("✅ serverState exists", "orgScanRoot", s.state.OrgScanRoot)
 
-	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
-		slog.Error("❌ serverState.Scanner or ProcessedFiles is NIL")
+	if s.state.Scanner == nil || s.state.Scanner.ProcessedFiles == nil {
+		slog.Error("❌ s.state.Scanner or ProcessedFiles is NIL")
 		return nil, nil
 	}
 
@@ -60,7 +60,7 @@ func (s *ServerImpl) Symbols(ctx context.Context, params *protocol.WorkspaceSymb
 	skipCount := 0
 
 	// Iterate through all UUID-indexed headers
-	serverState.Scanner.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
+	s.state.Scanner.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
 		uuidKey, ok := key.(orgscanner.UUID)
 		if !ok {
 			slog.Warn("⚠️ UUID key is not an orgscanner.UUID", "key", key, "keyType", fmt.Sprintf("%T", key))

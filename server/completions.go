@@ -13,18 +13,18 @@ import (
 
 func (s *ServerImpl) Completion(ctx context.Context, params *protocol.CompletionParams) (result *protocol.CompletionList, err error) {
 	slog.Debug("Completion handler called", "uri", params.TextDocument.URI, "line", params.Position.Line, "char", params.Position.Character)
-	if serverState == nil {
+	if s.state == nil {
 		slog.Error("Server state is nil in completion")
 		return &protocol.CompletionList{
 			IsIncomplete: false,
 			Items:        []protocol.CompletionItem{},
 		}, nil
 	}
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
-	doc, found := serverState.OpenDocs[uri]
+	doc, found := s.state.OpenDocs[uri]
 	if !found {
 		slog.Debug("Document not in OpenDocs", "uri", uri)
 		return &protocol.CompletionList{
@@ -34,7 +34,7 @@ func (s *ServerImpl) Completion(ctx context.Context, params *protocol.Completion
 	}
 
 	// Check completion context - are we in "id:" or ":tag:" completion?
-	completionCtx := detectCompletionContext(doc, protocol.DocumentURI(uri), params.Position)
+	completionCtx := detectCompletionContext(s.state, doc, protocol.DocumentURI(uri), params.Position)
 
 	if completionCtx.Type == "" {
 		return &protocol.CompletionList{
@@ -47,11 +47,11 @@ func (s *ServerImpl) Completion(ctx context.Context, params *protocol.Completion
 
 	switch completionCtx.Type {
 	case ContextTypeID:
-		items = completeIDs(completionCtx)
+		items = completeIDs(s.state, completionCtx)
 	case ContextTypeTag:
-		items = completeTags(doc, params.Position, completionCtx)
+		items = completeTags(s.state, doc, params.Position, completionCtx)
 	case ContextTypeFile:
-		items = completeFiles(completionCtx)
+		items = completeFiles(s.state, completionCtx)
 	case ContextTypeBlock:
 		items = completeBlockTypes(completionCtx, params.Position)
 	case ContextTypeExport:
@@ -66,7 +66,7 @@ func (s *ServerImpl) Completion(ctx context.Context, params *protocol.Completion
 	}, nil
 }
 
-func detectCompletionContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
+func detectCompletionContext(state *State, doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
 	// First check if we're in a tag context (on headline line)
 	headline, found := findNodeAtPosition[org.Headline](doc, pos)
 	if found {
@@ -78,33 +78,33 @@ func detectCompletionContext(doc *org.Document, uri protocol.DocumentURI, pos pr
 	}
 
 	// Check if we're in an export block completion context (must be before block context)
-	exportCtx := detectExportBlockContext(doc, uri, pos)
+	exportCtx := detectExportBlockContext(state, doc, uri, pos)
 	if exportCtx.Type != ContextTypeNone {
 		return exportCtx
 	}
 
 	// Check if we're in a block type completion context
-	blockCtx := detectBlockContext(doc, uri, pos)
+	blockCtx := detectBlockContext(state, doc, uri, pos)
 	if blockCtx.Type != ContextTypeNone {
 		return blockCtx
 	}
 
 	// Check if we're in a file link completion context
-	fileCtx := detectFileContext(doc, uri, pos)
+	fileCtx := detectFileContext(state, doc, uri, pos)
 	if fileCtx.Type != ContextTypeNone {
 		return fileCtx
 	}
 
 	// Check if we're in an ID link completion context by examining text before cursor
-	return detectIDContext(doc, uri, pos)
+	return detectIDContext(state, doc, uri, pos)
 }
 
 // detectPrefixContext is a generic helper that checks if cursor is after a specific prefix
-func detectPrefixContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position, prefix string, ctxType CompletionContextType, checkClosingBrackets bool) CompletionContext {
+func detectPrefixContext(state *State, doc *org.Document, uri protocol.DocumentURI, pos protocol.Position, prefix string, ctxType CompletionContextType, checkClosingBrackets bool) CompletionContext {
 	ctx := CompletionContext{Type: ContextTypeNone}
 
 	// Get raw content to check text before cursor
-	content, found := serverState.RawContent[uri]
+	content, found := state.RawContent[uri]
 	if !found {
 		return ctx
 	}
@@ -148,23 +148,23 @@ func detectPrefixContext(doc *org.Document, uri protocol.DocumentURI, pos protoc
 }
 
 // detectBlockContext checks if cursor is in a block type completion context (after "#+begin_")
-func detectBlockContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
-	return detectPrefixContext(doc, uri, pos, "#+begin_", ContextTypeBlock, false)
+func detectBlockContext(state *State, doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
+	return detectPrefixContext(state, doc, uri, pos, "#+begin_", ContextTypeBlock, false)
 }
 
 // detectExportBlockContext checks if cursor is in an export block completion context (after "#+begin_export_")
-func detectExportBlockContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
-	return detectPrefixContext(doc, uri, pos, "#+begin_export_", ContextTypeExport, false)
+func detectExportBlockContext(state *State, doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
+	return detectPrefixContext(state, doc, uri, pos, "#+begin_export_", ContextTypeExport, false)
 }
 
 // detectFileContext checks if cursor is in a file link completion context (after "[[file:")
-func detectFileContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
-	return detectPrefixContext(doc, uri, pos, "[[file:", ContextTypeFile, true)
+func detectFileContext(state *State, doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
+	return detectPrefixContext(state, doc, uri, pos, "[[file:", ContextTypeFile, true)
 }
 
 // detectIDContext checks if cursor is in an ID completion context (after "[[id:")
-func detectIDContext(doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
-	ctx := detectPrefixContext(doc, uri, pos, "[[id:", ContextTypeID, true)
+func detectIDContext(state *State, doc *org.Document, uri protocol.DocumentURI, pos protocol.Position) CompletionContext {
+	ctx := detectPrefixContext(state, doc, uri, pos, "[[id:", ContextTypeID, true)
 	// ID context uses lowercase filter for case-insensitive matching
 	ctx.FilterPrefix = strings.ToLower(ctx.FilterPrefix)
 	return ctx
@@ -193,15 +193,15 @@ func detectTagContext(doc *org.Document, pos protocol.Position, headline *org.He
 	}
 }
 
-func completeIDs(ctx CompletionContext) []protocol.CompletionItem {
-	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
+func completeIDs(state *State, ctx CompletionContext) []protocol.CompletionItem {
+	if state.Scanner == nil || state.Scanner.ProcessedFiles == nil {
 		return nil
 	}
 
 	var items []protocol.CompletionItem
 
 	// Walk through all UUIDs in the index
-	serverState.Scanner.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
+	state.Scanner.ProcessedFiles.UuidIndex.Range(func(key, value any) bool {
 		uuid := string(key.(orgscanner.UUID))
 		location := value.(orgscanner.HeaderLocation)
 
@@ -220,7 +220,7 @@ func completeIDs(ctx CompletionContext) []protocol.CompletionItem {
 		}
 
 		// Generate hover preview for this header as documentation
-		preview := extractContextLinesForCompletion(location)
+		preview := extractContextLinesForCompletion(state, location)
 
 		// Build insert text: UUID + closing brackets if needed
 		insertText := uuid
@@ -251,8 +251,8 @@ func completeIDs(ctx CompletionContext) []protocol.CompletionItem {
 // Excludes header and properties list, since the former is already included in
 // the completion item's name, and the latter is useless, so starts 4 lines
 // *after*
-func extractContextLinesForCompletion(loc orgscanner.HeaderLocation) string {
-	absPath := filepath.Join(serverState.OrgScanRoot, loc.FilePath)
+func extractContextLinesForCompletion(state *State, loc orgscanner.HeaderLocation) string {
+	absPath := filepath.Join(state.OrgScanRoot, loc.FilePath)
 	absPath = filepath.Clean(absPath)
 
 	lines, err := readFileLines(absPath)
@@ -295,8 +295,8 @@ func extractContextLinesForCompletion(loc orgscanner.HeaderLocation) string {
 	return context.String()
 }
 
-func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContext) []protocol.CompletionItem {
-	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
+func completeTags(state *State, doc *org.Document, pos protocol.Position, ctx CompletionContext) []protocol.CompletionItem {
+	if state.Scanner == nil || state.Scanner.ProcessedFiles == nil {
 		return nil
 	}
 
@@ -304,7 +304,7 @@ func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContex
 	seenTags := make(map[string]bool)
 
 	// Collect all unique tags from TagMap
-	for tag := range serverState.Scanner.ProcessedFiles.TagMap {
+	for tag := range state.Scanner.ProcessedFiles.TagMap {
 		if !seenTags[tag] {
 			seenTags[tag] = true
 
@@ -323,8 +323,8 @@ func completeTags(doc *org.Document, pos protocol.Position, ctx CompletionContex
 }
 
 // Helper to get string pointer
-func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
-	if serverState.Scanner == nil || serverState.Scanner.ProcessedFiles == nil {
+func completeFiles(state *State, ctx CompletionContext) []protocol.CompletionItem {
+	if state.Scanner == nil || state.Scanner.ProcessedFiles == nil {
 		return nil
 	}
 
@@ -332,7 +332,7 @@ func completeFiles(ctx CompletionContext) []protocol.CompletionItem {
 	filterLower := strings.ToLower(ctx.FilterPrefix)
 
 	// Walk through all processed files using sync.Map.Range
-	serverState.Scanner.ProcessedFiles.Files.Range(func(key, value any) bool {
+	state.Scanner.ProcessedFiles.Files.Range(func(key, value any) bool {
 		fileInfo, ok := value.(*orgscanner.FileInfo)
 		if !ok {
 			return true // continue iteration

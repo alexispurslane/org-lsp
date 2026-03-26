@@ -43,4 +43,5 @@ type State struct {
 	OpenDocs    map[protocol.DocumentURI]*org.Document
 	RawContent  map[protocol.DocumentURI]string
 	DocVersions map[protocol.DocumentURI]int32
+	Client      protocol.Client // LSP client for sending notifications
 }

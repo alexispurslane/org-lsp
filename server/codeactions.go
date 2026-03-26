@@ -13,14 +13,14 @@ import (
 )
 
 func (s *ServerImpl) CodeAction(ctx context.Context, params *protocol.CodeActionParams) (result []protocol.CodeAction, err error) {
-	if serverState == nil {
+	if s.state == nil {
 		return nil, nil
 	}
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
-	doc, ok := serverState.OpenDocs[uri]
+	doc, ok := s.state.OpenDocs[uri]
 	if !ok {
 		return nil, nil
 	}
@@ -426,17 +426,17 @@ func getCodeBlockAction(block org.Block, uri protocol.DocumentURI) protocol.Code
 
 // ExecuteCodeBlock executes the code in a src block and returns the result.
 // This is called via workspace/executeCommand.
-func ExecuteCodeBlock(uri protocol.DocumentURI, line, column int) (string, error) {
+func (s *ServerImpl) ExecuteCodeBlock(uri protocol.DocumentURI, line, column int) (string, error) {
 	slog.Debug("Executing code block", "uri", uri, "line", line, "column", column)
 
-	if serverState == nil {
+	if s.state == nil {
 		slog.Debug("Server state nil", "error", "server state not initialized")
 		return "", fmt.Errorf("server state not initialized")
 	}
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
-	doc, ok := serverState.OpenDocs[uri]
+	doc, ok := s.state.OpenDocs[uri]
 	if !ok {
 		slog.Debug("Document not found", "uri", uri)
 		return "", fmt.Errorf("document not found")

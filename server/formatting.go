@@ -17,18 +17,18 @@ import (
 // It ensures all headings have UUIDs, normalizes spacing, aligns tags,
 // and applies other org-mode formatting conventions.
 func (s *ServerImpl) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) (result []protocol.TextEdit, err error) {
-	if serverState == nil {
+	if s.state == nil {
 		return nil, fmt.Errorf("server not initialized")
 	}
 
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	slog.Debug("Formatting document", "uri", uri)
 
 	// Get the raw content
-	content, ok := serverState.RawContent[uri]
+	content, ok := s.state.RawContent[uri]
 	if !ok {
 		return nil, fmt.Errorf("document not open: %s", uri)
 	}
@@ -64,18 +64,18 @@ func (s *ServerImpl) WillSaveWaitUntil(ctx context.Context, params *protocol.Wil
 }
 
 func (s *ServerImpl) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) (result []protocol.TextEdit, err error) {
-	if serverState == nil {
+	if s.state == nil {
 		return nil, fmt.Errorf("server not initialized")
 	}
 
-	serverState.Mu.RLock()
-	defer serverState.Mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 
 	uri := params.TextDocument.URI
 	slog.Debug("Range formatting document", "uri", uri, "range", params.Range)
 
 	// Get the raw content
-	content, ok := serverState.RawContent[uri]
+	content, ok := s.state.RawContent[uri]
 	if !ok {
 		return nil, fmt.Errorf("document not open: %s", uri)
 	}
