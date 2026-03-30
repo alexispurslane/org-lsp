@@ -11,6 +11,7 @@ import (
 
 	"github.com/alexispurslane/org-lsp/lspstream"
 	"github.com/alexispurslane/org-lsp/server"
+	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.uber.org/zap"
 )
@@ -55,12 +56,17 @@ func runStdio(impl *server.ServerImpl) error {
 	if err != nil {
 		return fmt.Errorf("failed to create logger: %w", err)
 	}
+	// Use LargeBufferStream with 128KB buffer for large files
+	// Also wrap with debug logging to see what Zed sends
 	rwc := lspstream.NewReadWriteCloser(os.Stdin, os.Stdout, nil)
-	stream := lspstream.NewLargeBufferStream(rwc)
+	var stream jsonrpc2.Stream
+	if os.Getenv("ORG_LSP_DEBUG_STREAM") == "1" {
+		stream = lspstream.NewDebugLargeBufferStream(rwc, "stdio")
+	} else {
+		stream = lspstream.NewLargeBufferStream(rwc)
+	}
 	ctx, conn, client := protocol.NewServer(ctx, impl, stream, logger)
 	impl.SetClient(client)
-	handler := protocol.ServerHandler(impl, nil)
-	conn.Go(ctx, handler)
 	<-conn.Done()
 	return conn.Err()
 }
@@ -86,8 +92,6 @@ func runTCP(impl *server.ServerImpl, addr string) error {
 			stream := lspstream.NewLargeBufferStream(conn)
 			ctx, srvConn, client := protocol.NewServer(ctx, impl, stream, logger)
 			impl.SetClient(client)
-			handler := protocol.ServerHandler(impl, nil)
-			srvConn.Go(ctx, handler)
 			<-srvConn.Done()
 		}()
 	}

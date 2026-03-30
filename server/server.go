@@ -188,11 +188,11 @@ func (s *ServerImpl) CodeLensResolve(ctx context.Context, params *protocol.CodeL
 }
 
 func (s *ServerImpl) SelectionRange(ctx context.Context, params *protocol.SelectionRangeParams) (result []protocol.SelectionRange, err error) {
-	return nil, nil
+	return []protocol.SelectionRange{}, nil
 }
 
 func (s *ServerImpl) ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) (result []protocol.ColorPresentation, err error) {
-	return nil, nil
+	return []protocol.ColorPresentation{}, nil
 }
 
 func (s *ServerImpl) CompletionResolve(ctx context.Context, params *protocol.CompletionItem) (result *protocol.CompletionItem, err error) {
@@ -200,7 +200,7 @@ func (s *ServerImpl) CompletionResolve(ctx context.Context, params *protocol.Com
 }
 
 func (s *ServerImpl) Declaration(ctx context.Context, params *protocol.DeclarationParams) (result []protocol.Location /* Declaration | DeclarationLink[] | null */, err error) {
-	return nil, nil
+	return []protocol.Location{}, nil
 }
 
 func (s *ServerImpl) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) (err error) {
@@ -328,7 +328,7 @@ func (s *ServerImpl) DidSave(ctx context.Context, params *protocol.DidSaveTextDo
 }
 
 func (s *ServerImpl) DocumentColor(ctx context.Context, params *protocol.DocumentColorParams) (result []protocol.ColorInformation, err error) {
-	return nil, nil
+	return []protocol.ColorInformation{}, nil
 }
 
 func (s *ServerImpl) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (result interface{}, err error) {
@@ -336,11 +336,11 @@ func (s *ServerImpl) ExecuteCommand(ctx context.Context, params *protocol.Execut
 }
 
 func (s *ServerImpl) Implementation(ctx context.Context, params *protocol.ImplementationParams) (result []protocol.Location, err error) {
-	return nil, nil
+	return []protocol.Location{}, nil
 }
 
 func (s *ServerImpl) OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) (result []protocol.TextEdit, err error) {
-	return nil, nil
+	return []protocol.TextEdit{}, nil
 }
 
 func (s *ServerImpl) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (result *protocol.Range, err error) {
@@ -356,7 +356,7 @@ func (s *ServerImpl) SignatureHelp(ctx context.Context, params *protocol.Signatu
 }
 
 func (s *ServerImpl) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) (result []protocol.Location, err error) {
-	return nil, nil
+	return []protocol.Location{}, nil
 }
 
 func (s *ServerImpl) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (err error) {
@@ -396,15 +396,15 @@ func (s *ServerImpl) CodeLensRefresh(ctx context.Context) (err error) {
 }
 
 func (s *ServerImpl) PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) (result []protocol.CallHierarchyItem, err error) {
-	return nil, nil
+	return []protocol.CallHierarchyItem{}, nil
 }
 
 func (s *ServerImpl) IncomingCalls(ctx context.Context, params *protocol.CallHierarchyIncomingCallsParams) (result []protocol.CallHierarchyIncomingCall, err error) {
-	return nil, nil
+	return []protocol.CallHierarchyIncomingCall{}, nil
 }
 
 func (s *ServerImpl) OutgoingCalls(ctx context.Context, params *protocol.CallHierarchyOutgoingCallsParams) (result []protocol.CallHierarchyOutgoingCall, err error) {
-	return nil, nil
+	return []protocol.CallHierarchyOutgoingCall{}, nil
 }
 
 func (s *ServerImpl) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (result *protocol.SemanticTokens, err error) {
@@ -428,7 +428,7 @@ func (s *ServerImpl) LinkedEditingRange(ctx context.Context, params *protocol.Li
 }
 
 func (s *ServerImpl) Moniker(ctx context.Context, params *protocol.MonikerParams) (result []protocol.Moniker, err error) {
-	return nil, nil
+	return []protocol.Moniker{}, nil
 }
 
 func (s *ServerImpl) Request(ctx context.Context, method string, params interface{}) (result interface{}, err error) {
