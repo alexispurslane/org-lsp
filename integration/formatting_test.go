@@ -777,3 +777,62 @@ func applyEdits(t *testing.T, tc *LSPTestContext, filename string, edits []proto
 	// A real implementation would need to handle multiple incremental edits
 	return edits[0].NewText
 }
+
+func TestFormatNormalizesPlanningDirectiveIndentation(t *testing.T) {
+	Given("an org file with planning directives at different levels with incorrect indentation", t,
+		func(t *testing.T) *LSPTestContext {
+			tc := NewTestContext(t)
+			content := `* Level 1 Heading
+	DEADLINE: <2024-01-15 Mon>
+
+** Level 2 Heading
+   CLOCK: [2024-01-16 Tue 09:00]
+
+*** Level 3 Heading
+	    CLOSED: [2024-01-17 Wed]
+
+**** Level 4 with Extra Indent
+	      SCHEDULED: <2024-01-18 Thu 09:00>`
+			tc.GivenFile("planning.org", content).
+				GivenOpenFile("planning.org")
+			return tc
+		},
+		func(t *testing.T, tc *LSPTestContext) {
+			params := protocol.DocumentFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: tc.DocURI("planning.org"),
+				},
+			}
+
+			When(t, tc, "formatting the document", "textDocument/formatting", params, func(t *testing.T, edits []protocol.TextEdit) {
+				Then("planning directives should be indented correctly based on heading level", t, func(t *testing.T) {
+					testza.AssertNotNil(t, edits, "Expected non-nil edits")
+
+					formatted := applyEdits(t, tc, "planning.org", edits)
+					t.Logf("Formatted output:\n%s\n", formatted)
+					lines := strings.SplitSeq(formatted, "\n")
+
+					for line := range lines {
+						stripped := strings.TrimSpace(line)
+						if strings.HasPrefix(stripped, "DEADLINE:") {
+							level1Expected := strings.Repeat(" ", 2) // Level 1 = 2 spaces
+							testza.AssertTrue(t, strings.HasPrefix(line, level1Expected+"DEADLINE:"), "Level 1 DEADLINE should have 2-space indent, got: %q", line)
+						}
+						if strings.HasPrefix(stripped, "CLOCK:") {
+							level2Expected := strings.Repeat(" ", 3) // Level 2 = 3 spaces
+							testza.AssertTrue(t, strings.HasPrefix(line, level2Expected+"CLOCK:"), "Level 2 CLOCK should have 3-space indent, got: %q", line)
+						}
+						if strings.HasPrefix(stripped, "CLOSED:") {
+							level3Expected := strings.Repeat(" ", 4) // Level 3 = 4 spaces
+							testza.AssertTrue(t, strings.HasPrefix(line, level3Expected+"CLOSED:"), "Level 3 CLOSED should have 4-space indent, got: %q", line)
+						}
+						if strings.HasPrefix(stripped, "SCHEDULED:") {
+							level4Expected := strings.Repeat(" ", 5) // Level 4 = 5 spaces
+							testza.AssertTrue(t, strings.HasPrefix(line, level4Expected+"SCHEDULED:"), "Level 4 SCHEDULED should have 5-space indent, got: %q", line)
+						}
+					}
+				})
+			})
+		},
+	)
+}

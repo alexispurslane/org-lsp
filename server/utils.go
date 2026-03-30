@@ -61,17 +61,32 @@ func findNodesInRange(nodes []org.Node, startLine, endLine int) []org.Node {
 
 	var walk func(node org.Node) bool
 	walk = func(node org.Node) bool {
-		pos := node.Position()
+		// Unwrap NodeWithMeta to get the actual node's position
+		// NodeWithMeta wraps nodes with metadata like #+ATTR_HTML: keywords,
+		// and its position spans the entire wrapped content, which causes
+		// overly broad matches when checking if a node is in range.
+		actualNode := node
+		if nodeWithMeta, ok := node.(org.NodeWithMeta); ok {
+			actualNode = nodeWithMeta.Node
+		}
+		pos := actualNode.Position()
 
 		// Check if this node overlaps with our selection range
 		if pos.StartLine <= endLine && pos.EndLine >= startLine {
-			// If it's completely inside, or the top is inside, then we should add it to our list
+			// If it's completely inside, add it to results
 			fullyContained := pos.StartLine >= startLine && pos.EndLine <= endLine
-			topOverlaps := pos.StartLine >= startLine && pos.EndLine >= endLine
+			// For Headlines, also check if the top overlaps - this allows
+			// selecting a heading line and including its entire subtree.
+			// For other node types (especially NodeWithMeta), only use fullyContained
+			// to avoid including overly broad positions.
+			_, isHeadline := actualNode.(org.Headline)
+			topOverlaps := isHeadline && pos.StartLine >= startLine && pos.EndLine >= endLine
+
 			if fullyContained || topOverlaps {
 				results = append(results, node)
 			} else {
-				// If it is only overlapping, then we should investigate it for children that satisfy our criteria
+				// If it is only partially overlapping, investigate children
+				// that might satisfy our criteria
 				node.Range(func(n org.Node) bool {
 					return walk(n)
 				})

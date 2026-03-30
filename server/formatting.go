@@ -42,6 +42,10 @@ func (s *ServerImpl) Formatting(ctx context.Context, params *protocol.DocumentFo
 	// Serialize the formatted AST back to string
 	output := org.String(formattedNodes...)
 
+	// Post-process to fix planning directive indentation
+	// The go-org serializer applies default indentation, so we need to override it
+	output = fixPlanningDirectiveIndentation(output)
+
 	// Return a single text edit that replaces the entire document
 	edit := protocol.TextEdit{
 		Range: protocol.Range{
@@ -149,10 +153,41 @@ func (s *ServerImpl) RangeFormatting(ctx context.Context, params *protocol.Docum
 	return []protocol.TextEdit{edit}, nil
 }
 
-// formatNodes processes a slice of nodes, handling inter-node concerns:
+// needsSpaceBefore checks if a node is an inline element that typically needs
+// a space before it in normal prose (excluding cases where it's at the start of a line).
+// This includes links, timestamps, footnote references, and statistic tokens.
+func needsSpaceBefore(n org.Node) bool {
+	switch n.(type) {
+	case org.RegularLink, org.FootnoteLink, org.Timestamp, org.StatisticToken:
+		return true
+	default:
+		return false
+	}
+}
+
+// preserveTrailingSpacesForNeighbors processes a list of nodes to ensure
+// text nodes that precede inline elements retain their trailing spaces.
+func preserveTrailingSpacesForNeighbors(nodes []org.Node) []org.Node {
+	for i := 0; i < len(nodes)-1; i++ {
+		current, next := nodes[i], nodes[i+1]
+
+		// If current is a Text node and next needs space before it
+		if textNode, ok := current.(org.Text); ok && needsSpaceBefore(next) {
+			// Ensure the text node ends with a space and has content
+			if textNode.Content != "" && !strings.HasSuffix(textNode.Content, " ") {
+				textNode.Content += " "
+				nodes[i] = textNode
+			}
+		}
+	}
+	return nodes
+}
+
+// formatNodes processes a list of nodes, handling inter-node concerns:
 // - Filtering empty paragraphs
 // - Consolidating keywords at document level
 // - Inserting blank lines before headings
+// - Preserving trailing spaces before inline elements
 func formatNodes(nodes []org.Node) []org.Node {
 	if len(nodes) == 0 {
 		return nodes
@@ -190,7 +225,17 @@ func formatNodes(nodes []org.Node) []org.Node {
 		}
 
 		// Format the individual node (which recursively formats its children)
-		result = append(result, formatNode(n))
+		formatted := formatNode(n)
+
+		// After formatting, preserve trailing spaces before inline elements
+		// This is needed because formatText removes them, but we need them
+		// before links and other inline elements for proper spacing
+		if p, ok := formatted.(org.Paragraph); ok {
+			p.Children = preserveTrailingSpacesForNeighbors(p.Children)
+			formatted = p
+		}
+
+		result = append(result, formatted)
 	}
 
 	return result
@@ -289,12 +334,19 @@ func formatHeadline(h org.Headline) org.Node {
 	// Align tags to consistent column (default: column 77, or max line length + 1)
 	h.Tags = normalizeTags(h.Tags)
 
-	// Format property drawer if present
-	if h.Properties != nil {
+	// Format property drawer if present and ensure blank line after
+	hasPropertyDrawer := h.Properties != nil
+	if hasPropertyDrawer {
 		formatted := formatPropertyDrawer(*h.Properties)
 		if pd, ok := formatted.(org.PropertyDrawer); ok {
 			h.Properties = &pd
 		}
+	}
+
+	// Add blank line after property drawer if present and there are children
+	if hasPropertyDrawer && len(h.Children) > 0 {
+		// Prepend a blank line as the first child
+		h.Children = append([]org.Node{org.Text{Content: "\n"}}, h.Children...)
 	}
 
 	return h
@@ -518,6 +570,59 @@ func generateUUID() string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
+
+// fixPlanningDirectiveIndentation post-processes the serialized content to ensure
+// planning directives (DEADLINE, SCHEDULED, CLOCK, CLOSED) are indented by heading-level+1 spaces
+func fixPlanningDirectiveIndentation(content string) string {
+	lines := strings.Split(content, "\n")
+	currentLevel := 0
+	planningKeywords := []string{"DEADLINE", "SCHEDULED", "CLOCK", "CLOSED"}
+
+	for i, line := range lines {
+		if level := getHeadingLevel(line); level > 0 {
+			currentLevel = level
+			continue
+		}
+
+		stripped := strings.TrimSpace(line)
+		if stripped == "" {
+			continue
+		}
+
+		for _, keyword := range planningKeywords {
+			if strings.HasPrefix(stripped, keyword+":") {
+				if currentLevel > 0 {
+					indentation := strings.Repeat(" ", currentLevel+1)
+					lines[i] = indentation + stripped
+				}
+				break
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// getHeadingLevel extracts the heading level from a line
+// Returns 0 if the line is not a heading
+func getHeadingLevel(line string) int {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "*") {
+		return 0
+	}
+	level := 0
+	for _, ch := range line {
+		if ch == '*' {
+			level++
+		} else if ch != ' ' {
+			break
+		}
+	}
+	return level
+}
+
+// formatPlanningDirectives ensures planning directives (DEADLINE, SCHEDULED, CLOCK, CLOSED)
+// are indented by heading-level+1 spaces
 
 // getEndPosition calculates the end position of the document content
 func getEndPosition(content string) protocol.Position {

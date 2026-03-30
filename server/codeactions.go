@@ -69,7 +69,7 @@ func (s *ServerImpl) CodeAction(ctx context.Context, params *protocol.CodeAction
 
 	// Check for snippet-based code actions on headlines
 	if headline, found := findNodeAtPosition[org.Headline](doc, cursorPos); found {
-		actions = append(actions, getSnippetCodeActions(*headline, uri, doc, cursorPos)...)
+		actions = append(actions, getSnippetCodeActions(*headline, uri, doc, cursorPos, params.Range)...)
 	}
 
 	// Check for selected text to wrap in link
@@ -207,7 +207,7 @@ func getHeadingConversionActions(nodes []org.Node, uri protocol.DocumentURI) []p
 
 	return []protocol.CodeAction{
 		{
-			Title:       "Convert headings to ordered list",
+			Title:       "Org: Convert headings to ordered list",
 			Kind:        kindRefactor,
 			Diagnostics: nil,
 			Edit: &protocol.WorkspaceEdit{
@@ -217,7 +217,7 @@ func getHeadingConversionActions(nodes []org.Node, uri protocol.DocumentURI) []p
 			},
 		},
 		{
-			Title:       "Convert headings to bullet list",
+			Title:       "Org: Convert headings to bullet list",
 			Kind:        kindRefactor,
 			Diagnostics: nil,
 			Edit: &protocol.WorkspaceEdit{
@@ -267,7 +267,7 @@ func getListConversionAction(list org.List, doc *org.Document, uri protocol.Docu
 		"selectionEnd", selectionRange.End.Line)
 
 	return protocol.CodeAction{
-		Title:       "Convert list to headings",
+		Title:       "Org: Convert list to headings",
 		Kind:        kindRefactor,
 		Diagnostics: nil,
 		Edit: &protocol.WorkspaceEdit{
@@ -305,21 +305,27 @@ func headingSubtreeToList(nodes []org.Node, listPos org.Position, cfg listConfig
 			// We want a newline between the former title and its children in
 			// the list item, to mirror what it looked like before.
 			title := headline.Title
-			if len(headline.Children) > 0 {
+			if len(headline.Children) > 0 || headline.Properties != nil {
 				title = append(title, org.Text{Content: "\n"})
 			}
 
 			var children []org.Node
+
+			// Add properties drawer if present
+			if headline.Properties != nil {
+				children = append(children, *headline.Properties)
+			}
+
 			if len(headline.Children) == 0 {
 				// If there are no children, we just need another newline to make things look nice
-				children = []org.Node{org.Text{Content: "\n"}}
+				children = append(children, org.Text{Content: "\n"})
 			} else {
 				// If this heading has children, we want to convert the whole
 				// heading tree, and it might have headings in its children, so
-				// we have to recur and convert that subtreen
+				// we have to recur and convert that subtree
 				childCfg := cfg
 				childCfg.Depth = cfg.Depth + 1
-				children = headingSubtreeToList(headline.Children, org.Position{}, childCfg)
+				children = append(children, headingSubtreeToList(headline.Children, org.Position{}, childCfg)...)
 			}
 
 			// Add the heading to the currently ongoing list

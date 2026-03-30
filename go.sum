@@ -13,8 +13,8 @@ github.com/MarvinJWendt/testza v0.3.0/go.mod h1:eFcL4I0idjtIx8P9C6KkAuLgATNKpX4/
 github.com/MarvinJWendt/testza v0.4.2/go.mod h1:mSdhXiKH8sg/gQehJ63bINcCKp7RtYewEjXsvsVUPbE=
 github.com/MarvinJWendt/testza v0.5.2 h1:53KDo64C1z/h/d/stCYCPY69bt/OSwjq5KpFNwi+zB4=
 github.com/MarvinJWendt/testza v0.5.2/go.mod h1:xu53QFE5sCdjtMCKk8YMQ2MnymimEctc4n3EjyIYvEY=
-github.com/alexispurslane/go-org v1.11.3 h1:hsIe+kmq3kSrRjio2/ZYJ9wAkH4BG5gwux+24M799cQ=
-github.com/alexispurslane/go-org v1.11.3/go.mod h1:QkUEqK24klcM23aucM2HGIh3B/7j/7IhE9H+HNacb2c=
+github.com/alexispurslane/go-org v1.11.4 h1:2fPkS7pA8xvGjI0LPCwVREkiUwG1VMvzxl1qgEDb59o=
+github.com/alexispurslane/go-org v1.11.4/go.mod h1:QkUEqK24klcM23aucM2HGIh3B/7j/7IhE9H+HNacb2c=
 github.com/alexispurslane/protocol v0.13.0 h1:5pqA8EIc6u3+uyC2vH8j9ek8wHwx1j0WQ6+ajryM3RM=
 github.com/alexispurslane/protocol v0.13.0/go.mod h1:gu9RF8+QZggt7jWiUmXPROibCShycEigMvkmmnD9SYE=
 github.com/atomicgo/cursor v0.0.1/go.mod h1:cBON2QmmrysudxNBFthvMtN32r3jxVRIvzkUiF/RuIk=

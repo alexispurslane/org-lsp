@@ -11,7 +11,7 @@ import (
 
 // getSnippetCodeActions returns all applicable snippet-based code actions
 // for the given headline at the cursor position.
-func getSnippetCodeActions(headline org.Headline, uri protocol.DocumentURI, doc *org.Document, cursorPos protocol.Position) []protocol.CodeAction {
+func getSnippetCodeActions(headline org.Headline, uri protocol.DocumentURI, doc *org.Document, cursorPos protocol.Position, selectionRange protocol.Range) []protocol.CodeAction {
 	var actions []protocol.CodeAction
 
 	// 1. Add DEADLINE (only if headline doesn't have DEADLINE)
@@ -187,33 +187,35 @@ func getSnippetCodeActions(headline org.Headline, uri protocol.DocumentURI, doc 
 		genericPropSnippet,
 	))
 
-	// 12. Insert Link (always available - at cursor position)
-	linkSnippet := "[[${1:url}][${2:description}]]$0"
-	linkRange := protocol.Range{
-		Start: cursorPos,
-		End:   cursorPos,
-	}
-	actions = append(actions, createSnippetAction(
-		"Org: Insert link",
-		protocol.CodeActionKind("source"),
-		uri,
-		linkRange,
-		linkSnippet,
-	))
+	// 12. Insert Link (only when no text is selected - otherwise "Wrap selection in link" handles this)
+	if !hasSelection(selectionRange) {
+		linkSnippet := "[[${1:url}][${2:description}]]$0"
+		linkRange := protocol.Range{
+			Start: cursorPos,
+			End:   cursorPos,
+		}
+		actions = append(actions, createSnippetAction(
+			"Org: Insert link",
+			protocol.CodeActionKind("source"),
+			uri,
+			linkRange,
+			linkSnippet,
+		))
 
-	// 13. Insert ID Link (always available - at cursor position)
-	idLinkSnippet := "[[id:${1:id}]]$0"
-	idLinkRange := protocol.Range{
-		Start: cursorPos,
-		End:   cursorPos,
+		// 13. Insert ID Link (only when no text is selected)
+		idLinkSnippet := "[[id:${1:id}]]$0"
+		idLinkRange := protocol.Range{
+			Start: cursorPos,
+			End:   cursorPos,
+		}
+		actions = append(actions, createSnippetAction(
+			"Org: Insert ID link",
+			protocol.CodeActionKind("source"),
+			uri,
+			idLinkRange,
+			idLinkSnippet,
+		))
 	}
-	actions = append(actions, createSnippetAction(
-		"Org: Insert ID link",
-		protocol.CodeActionKind("source"),
-		uri,
-		idLinkRange,
-		idLinkSnippet,
-	))
 
 	return actions
 }

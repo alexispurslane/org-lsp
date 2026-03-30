@@ -4,7 +4,7 @@ go 1.25.6
 
 require (
 	github.com/MarvinJWendt/testza v0.5.2
-	github.com/alexispurslane/go-org v1.11.3
+	github.com/alexispurslane/go-org v1.11.4
 	go.lsp.dev/jsonrpc2 v0.10.0
 	go.lsp.dev/protocol v0.12.0
 	go.uber.org/zap v1.27.0

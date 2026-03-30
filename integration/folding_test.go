@@ -37,17 +37,17 @@ Content under heading 2`
 					testza.AssertLen(t, ranges, 3, "Expected 3 folding ranges (2 headings + 1 subheading)")
 
 					// Heading 1: starts at line 1 (after heading), ends at line 4 (before Heading 2)
-					testza.AssertEqual(t, uint32(1), ranges[0].StartLine, "Heading 1 should start at line 1")
+					testza.AssertEqual(t, uint32(0), ranges[0].StartLine, "Heading 1 should start at line 1")
 					testza.AssertEqual(t, uint32(4), ranges[0].EndLine, "Heading 1 should end at line 4")
-					testza.AssertEqual(t, protocol.CommentFoldingRange, ranges[0].Kind, "Headings should use Comment kind")
+					testza.AssertEqual(t, protocol.RegionFoldingRange, ranges[0].Kind, "Headings should use Comment kind")
 
 					// Subheading 1.1: starts at line 4 (after subheading), ends at line 4
-					testza.AssertEqual(t, uint32(4), ranges[1].StartLine, "Subheading 1.1 should start at line 4")
+					testza.AssertEqual(t, uint32(3), ranges[1].StartLine, "Subheading 1.1 should start at line 4")
 					testza.AssertEqual(t, uint32(4), ranges[1].EndLine, "Subheading 1.1 should end at line 4")
-					testza.AssertEqual(t, protocol.CommentFoldingRange, ranges[1].Kind, "Subheadings should use Comment kind")
+					testza.AssertEqual(t, protocol.RegionFoldingRange, ranges[1].Kind, "Subheadings should use Comment kind")
 
 					// Heading 2: starts at line 6 (after heading), ends at line 6
-					testza.AssertEqual(t, uint32(6), ranges[2].StartLine, "Heading 2 should start at line 6")
+					testza.AssertEqual(t, uint32(5), ranges[2].StartLine, "Heading 2 should start at line 6")
 					testza.AssertEqual(t, uint32(6), ranges[2].EndLine, "Heading 2 should end at line 6")
 				})
 			})
@@ -94,7 +94,7 @@ Final content`
 					// Find the block range (should be Region kind)
 					var blockRange *protocol.FoldingRange
 					for i := range ranges {
-						if ranges[i].Kind == protocol.RegionFoldingRange {
+						if ranges[i].Kind == protocol.ImportsFoldingRange {
 							blockRange = &ranges[i]
 							break
 						}
@@ -141,7 +141,7 @@ More content`
 					// Find the drawer range (should be Region kind)
 					var drawerRange *protocol.FoldingRange
 					for i := range ranges {
-						if ranges[i].Kind == protocol.RegionFoldingRange {
+						if ranges[i].Kind == protocol.CommentFoldingRange {
 							drawerRange = &ranges[i]
 							break
 						}

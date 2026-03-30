@@ -48,9 +48,9 @@ func collectSectionFoldingRanges(sections []*org.Section) []protocol.FoldingRang
 		// Add heading fold
 		pos := section.Headline.Position()
 		if pos.EndLine > pos.StartLine {
-			kind := protocol.CommentFoldingRange
+			kind := protocol.RegionFoldingRange
 			ranges = append(ranges, protocol.FoldingRange{
-				StartLine: uint32(pos.StartLine + 1), // Skip heading line itself
+				StartLine: uint32(pos.StartLine), // Skip heading line itself
 				EndLine:   uint32(pos.EndLine),
 				Kind:      kind,
 			})
@@ -62,7 +62,7 @@ func collectSectionFoldingRanges(sections []*org.Section) []protocol.FoldingRang
 			ranges = append(ranges, protocol.FoldingRange{
 				StartLine: uint32(pos.StartLine),
 				EndLine:   uint32(pos.EndLine),
-				Kind:      protocol.RegionFoldingRange,
+				Kind:      protocol.CommentFoldingRange,
 			})
 		}
 
@@ -74,14 +74,14 @@ func collectSectionFoldingRanges(sections []*org.Section) []protocol.FoldingRang
 				ranges = append(ranges, protocol.FoldingRange{
 					StartLine: uint32(pos.StartLine),
 					EndLine:   uint32(pos.EndLine),
-					Kind:      protocol.RegionFoldingRange,
+					Kind:      protocol.ImportsFoldingRange,
 				})
 			case org.Drawer:
 				pos := n.Position()
 				ranges = append(ranges, protocol.FoldingRange{
 					StartLine: uint32(pos.StartLine),
 					EndLine:   uint32(pos.EndLine),
-					Kind:      protocol.RegionFoldingRange,
+					Kind:      protocol.CommentFoldingRange,
 				})
 			}
 			return true
