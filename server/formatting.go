@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/alexispurslane/go-org/org"
@@ -158,29 +159,12 @@ func (s *ServerImpl) RangeFormatting(ctx context.Context, params *protocol.Docum
 // This includes links, timestamps, footnote references, and statistic tokens.
 func needsSpaceBefore(n org.Node) bool {
 	switch n.(type) {
-	case org.RegularLink, org.FootnoteLink, org.Timestamp, org.StatisticToken:
+	case org.RegularLink, org.FootnoteLink, org.Timestamp, org.StatisticToken,
+		org.Emphasis, org.InlineBlock:
 		return true
 	default:
 		return false
 	}
-}
-
-// preserveTrailingSpacesForNeighbors processes a list of nodes to ensure
-// text nodes that precede inline elements retain their trailing spaces.
-func preserveTrailingSpacesForNeighbors(nodes []org.Node) []org.Node {
-	for i := 0; i < len(nodes)-1; i++ {
-		current, next := nodes[i], nodes[i+1]
-
-		// If current is a Text node and next needs space before it
-		if textNode, ok := current.(org.Text); ok && needsSpaceBefore(next) {
-			// Ensure the text node ends with a space and has content
-			if textNode.Content != "" && !strings.HasSuffix(textNode.Content, " ") {
-				textNode.Content += " "
-				nodes[i] = textNode
-			}
-		}
-	}
-	return nodes
 }
 
 // formatNodes processes a list of nodes, handling inter-node concerns:
@@ -227,14 +211,6 @@ func formatNodes(nodes []org.Node) []org.Node {
 		// Format the individual node (which recursively formats its children)
 		formatted := formatNode(n)
 
-		// After formatting, preserve trailing spaces before inline elements
-		// This is needed because formatText removes them, but we need them
-		// before links and other inline elements for proper spacing
-		if p, ok := formatted.(org.Paragraph); ok {
-			p.Children = preserveTrailingSpacesForNeighbors(p.Children)
-			formatted = p
-		}
-
 		result = append(result, formatted)
 	}
 
@@ -253,8 +229,8 @@ func formatNode(n org.Node) org.Node {
 	switch node := n.(type) {
 	case org.Headline:
 		formatted = formatHeadline(node)
-	case org.Text:
-		formatted = formatText(node)
+	case org.Paragraph:
+		formatted = formatParagraph(node)
 	case org.Table:
 		formatted = formatTable(node)
 	case org.List:
@@ -384,39 +360,33 @@ func hasIDProperty(h org.Headline) bool {
 
 // formatText removes trailing whitespace from each line and collapses
 // more than 2 consecutive blank lines to exactly 2.
-func formatText(t org.Text) org.Node {
-	lines := strings.Split(t.Content, "\n")
-	var result strings.Builder
-	consecutiveBlanks := 0
+func formatParagraph(p org.Paragraph) org.Node {
+	// Match: [Non-Space][Marker][Non-Space]
+	stuckEmphasis := regexp.MustCompile(`([^\s])([*/=_\+])([^\s])`)
+	for i, current := range p.Children {
+		var next org.Node
+		if i < len(p.Children)-1 {
+			next = p.Children[i+1]
+		}
 
-	for _, line := range lines {
-		// Remove trailing whitespace from each line
-		line = strings.TrimRight(line, " \t")
+		fmt.Printf("Current type: %s, next type: %s, string value: %s\n", reflect.TypeOf(current), reflect.TypeOf(next), org.String(current))
 
-		isBlank := line == ""
-
-		if isBlank {
-			consecutiveBlanks++
-			// Allow at most 1 consecutive blank line
-			if consecutiveBlanks < 2 {
-				result.WriteString("\n")
+		if textNode, isText := current.(org.Text); isText {
+			if needsSpaceBefore(next) && !strings.HasSuffix(textNode.Content, " ") {
+				textNode.Content += " "
 			}
-		} else {
-			consecutiveBlanks = 0
-			result.WriteString(line)
-			result.WriteString("\n")
+			if strings.HasSuffix(textNode.Content, "\n") || next == nil {
+				textNode.Content = strings.TrimRight(textNode.Content, " \t")
+			}
+			if trimmed := strings.TrimLeft(textNode.Content, " \t"); trimmed[0] == '.' || trimmed[0] == ',' || trimmed[0] == '!' || trimmed[0] == '?' {
+				textNode.Content = trimmed
+			}
+			// Replace with: [Non-Space] [Marker][Non-Space]
+			textNode.Content = stuckEmphasis.ReplaceAllString(textNode.Content, "$1 $2$3")
+			p.Children[i] = textNode
 		}
 	}
-
-	// Remove trailing newline if original didn't end with one
-	if !strings.HasSuffix(t.Content, "\n") && result.Len() > 0 {
-		str := result.String()
-		t.Content = strings.TrimSuffix(str, "\n")
-	} else {
-		t.Content = result.String()
-	}
-
-	return t
+	return p
 }
 
 // formatTable aligns column widths

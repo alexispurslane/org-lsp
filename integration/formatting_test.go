@@ -323,6 +323,112 @@ More content
 	)
 }
 
+func TestFormatEmphasisSpacing(t *testing.T) {
+	Given("a correctly formatted set of emphasis in a paragraph", t,
+		func(t *testing.T) *LSPTestContext {
+			tc := NewTestContext(t)
+			content := `This is a paragraph with *bold* and /italics/.`
+			tc.GivenFile("emphasis.org", content).
+				GivenOpenFile("emphasis.org")
+			return tc
+		},
+		func(t *testing.T, tc *LSPTestContext) {
+			params := protocol.DocumentFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: tc.DocURI("emphasis.org"),
+				},
+			}
+
+			When(t, tc, "formatting the document", "textDocument/formatting", params, func(t *testing.T, edits []protocol.TextEdit) {
+				Then("correct emphasis spacing should be unchanged", t, func(t *testing.T) {
+					testza.AssertNotNil(t, edits, "Expected non-nil edits")
+
+					formatted := applyEdits(t, tc, "emphasis.org", edits)
+					testza.AssertEqual(t, "This is a paragraph with *bold* and /italics/.\n", formatted)
+				})
+			})
+		},
+	)
+	Given("an incorrectly formatted set of emphasis in a paragraph", t,
+		func(t *testing.T) *LSPTestContext {
+			tc := NewTestContext(t)
+			content := `This is a paragraph with*bold* and /italics/ .`
+			tc.GivenFile("emphasis.org", content).
+				GivenOpenFile("emphasis.org")
+			return tc
+		},
+		func(t *testing.T, tc *LSPTestContext) {
+			params := protocol.DocumentFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: tc.DocURI("emphasis.org"),
+				},
+			}
+
+			When(t, tc, "formatting the document", "textDocument/formatting", params, func(t *testing.T, edits []protocol.TextEdit) {
+				Then("incorrect emphasis spacing should be rectified", t, func(t *testing.T) {
+					testza.AssertNotNil(t, edits, "Expected non-nil edits")
+
+					formatted := applyEdits(t, tc, "emphasis.org", edits)
+					testza.AssertEqual(t, "This is a paragraph with *bold* and /italics/.\n", formatted)
+				})
+			})
+		},
+	)
+}
+
+func TestFormatLinkSpacing(t *testing.T) {
+	Given("a correctly formatted set of links in a paragraph", t,
+		func(t *testing.T) *LSPTestContext {
+			tc := NewTestContext(t)
+			content := `This is a paragraph with an undescribed link: [[https://foo.org]] and a described link: [[https://foo.org][hello!]].`
+			tc.GivenFile("links.org", content).
+				GivenOpenFile("links.org")
+			return tc
+		},
+		func(t *testing.T, tc *LSPTestContext) {
+			params := protocol.DocumentFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: tc.DocURI("links.org"),
+				},
+			}
+
+			When(t, tc, "formatting the document", "textDocument/formatting", params, func(t *testing.T, edits []protocol.TextEdit) {
+				Then("correct link spacing should be unchanged", t, func(t *testing.T) {
+					testza.AssertNotNil(t, edits, "Expected non-nil edits")
+
+					formatted := applyEdits(t, tc, "links.org", edits)
+					testza.AssertEqual(t, "This is a paragraph with an undescribed link: [[https://foo.org]] and a described link: [[https://foo.org][hello!]].\n", formatted)
+				})
+			})
+		},
+	)
+	Given("an incorrectly formatted set of links in a paragraph", t,
+		func(t *testing.T) *LSPTestContext {
+			tc := NewTestContext(t)
+			content := `This is a paragraph with an undescribed link:[[https://foo.org]] and a described link: [[https://foo.org][hello!]] .`
+			tc.GivenFile("links.org", content).
+				GivenOpenFile("links.org")
+			return tc
+		},
+		func(t *testing.T, tc *LSPTestContext) {
+			params := protocol.DocumentFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{
+					URI: tc.DocURI("links.org"),
+				},
+			}
+
+			When(t, tc, "formatting the document", "textDocument/formatting", params, func(t *testing.T, edits []protocol.TextEdit) {
+				Then("incorrect link spacing should be rectified", t, func(t *testing.T) {
+					testza.AssertNotNil(t, edits, "Expected non-nil edits")
+
+					formatted := applyEdits(t, tc, "links.org", edits)
+					testza.AssertEqual(t, "This is a paragraph with an undescribed link: [[https://foo.org]] and a described link: [[https://foo.org][hello!]].\n", formatted)
+				})
+			})
+		},
+	)
+}
+
 func TestFormatRemovesTrailingWhitespace(t *testing.T) {
 	Given("an org file with trailing whitespace", t,
 		func(t *testing.T) *LSPTestContext {
